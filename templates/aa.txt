@@ -1,0 +1,48 @@
+# ============================================
+# UPDATE THESE TWO VALUES WITH YOUR SETTINGS
+# ============================================
+BUCKET="novavoice-ai-agent-bucket"        # e.g., ai-agent-workshop-123456789012
+REGION="us-east-1"               # Your deployment region
+
+# ============================================
+# DO NOT MODIFY BELOW THIS LINE
+# ============================================
+# HTTPS URLs for CloudFormation templates (CFN requires HTTPS)
+BASE_URL="https://${BUCKET}.s3.${REGION}.amazonaws.com"
+# S3 URIs for asset files (Lambda uses S3 SDK to read from private buckets)
+S3_URI="s3://${BUCKET}"
+
+aws cloudformation create-stack \
+  --stack-name ai-agent-workshop \
+  --template-url "${BASE_URL}/templates/unified-workshop-stack.yaml" \
+  --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
+  --tags \
+    Key=Environment,Value=NonProd \
+    Key=Name,Value=NovaVoice \
+    Key=contact,Value=askdevopscloud@spglobal.com \
+    Key=AppID,Value=ASP0017650 \
+    Key=CreatedBy,Value=Abhay.Lunkad \
+    Key=Owner,Value=anuthama.c@spglobal.com \
+  --parameters \
+    ParameterKey=AssetsBucketName,ParameterValue=${BUCKET} \
+    ParameterKey=IndustryMode,ParameterValue=hotel \
+    ParameterKey=CreateKnowledgeBase,ParameterValue=true \
+    ParameterKey=CreateSharedApiKey,ParameterValue=true \
+    ParameterKey=CreateAIAgents,ParameterValue=true \
+    ParameterKey=CreateAgentCoreGateway,ParameterValue=true \
+    ParameterKey=IsWorkshopStudioEnv,ParameterValue=no \
+    ParameterKey=Boto3LayerS3Bucket,ParameterValue=${BUCKET} \
+    ParameterKey=Boto3LayerS3Key,ParameterValue=boto3-layer.zip \
+    ParameterKey=ConnectInstanceStackUrl,ParameterValue=${BASE_URL}/templates/connect-instance.yaml \
+    ParameterKey=AssistantSetupStackUrl,ParameterValue=${BASE_URL}/templates/assistant-setup.yaml \
+    ParameterKey=AssistantLoggingStackUrl,ParameterValue=${BASE_URL}/templates/assistant-logging.yaml \
+    ParameterKey=InstanceAttributesStackUrl,ParameterValue=${BASE_URL}/templates/connect-instance-attributes.yaml \
+    ParameterKey=AssistantKnowledgeBaseStackUrl,ParameterValue=${BASE_URL}/templates/assistant-knowledge-base.yaml \
+    ParameterKey=AIAgentsStackUrl,ParameterValue=${BASE_URL}/templates/ai-agents-setup.yaml \
+    ParameterKey=KnowledgeBaseZipUrl,ParameterValue=${S3_URI}/knowledge-base/hotel-assets.zip \
+    ParameterKey=AgentCoreGatewayStackUrl,ParameterValue=${BASE_URL}/templates/agentcore-gateway.yaml \
+    ParameterKey=HotelApiStackUrl,ParameterValue=${BASE_URL}/templates/hotel-api.yaml \
+    ParameterKey=HotelOpenApiSpecUrl,ParameterValue=${S3_URI}/hotel/hotel-api-openapi.yaml \
+    ParameterKey=HotelSeedDataUrl,ParameterValue=${S3_URI}/hotel/hotel-seed-data.json \
+    ParameterKey=HotelAgentAssistPromptUrl,ParameterValue=${S3_URI}/ai-agents/hotel/hotel-agent-assist-prompt.yaml \
+    ParameterKey=HotelSelfServicePromptUrl,ParameterValue=${S3_URI}/ai-agents/hotel/hotel-self-service-prompt.yaml

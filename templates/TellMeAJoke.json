@@ -1,0 +1,564 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "11111111-1111-1111-1111-111111111111",
+  "Metadata": {
+    "entryPointPosition": {
+      "x": 40,
+      "y": 40
+    },
+    "ActionMetadata": {
+      "11111111-1111-1111-1111-111111111111": {
+        "position": {
+          "x": 162.4,
+          "y": 108.8
+        }
+      },
+      "22222222-2222-2222-2222-222222222222": {
+        "position": {
+          "x": 421.6,
+          "y": 60
+        },
+        "conditions": [
+          {
+            "Condition": {
+              "Operands": [
+                {
+                  "displayName": "Joke1"
+                }
+              ]
+            }
+          },
+          {
+            "Condition": {
+              "Operands": [
+                {
+                  "displayName": "Joke2"
+                }
+              ]
+            }
+          },
+          {
+            "Condition": {
+              "Operands": [
+                {
+                  "displayName": "Joke3"
+                }
+              ]
+            }
+          },
+          {
+            "Condition": {
+              "Operands": [
+                {
+                  "displayName": "Joke4"
+                }
+              ]
+            }
+          },
+          {
+            "Condition": {
+              "Operands": [
+                {
+                  "displayName": "Joke5"
+                }
+              ]
+            }
+          },
+          {
+            "Condition": {
+              "Operands": [
+                {
+                  "displayName": "Joke6"
+                }
+              ]
+            }
+          },
+          {
+            "Condition": {
+              "Operands": [
+                {
+                  "displayName": "Joke7"
+                }
+              ]
+            }
+          },
+          {
+            "Condition": {
+              "Operands": [
+                {
+                  "displayName": "Joke8"
+                }
+              ]
+            }
+          }
+        ],
+        "conditionMetadata": [
+          {
+            "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            "percent": {
+              "value": 1,
+              "display": "12%"
+            },
+            "name": "Joke1",
+            "value": "12"
+          },
+          {
+            "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            "percent": {
+              "value": 1,
+              "display": "13%"
+            },
+            "name": "Joke2",
+            "value": "13"
+          },
+          {
+            "id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+            "percent": {
+              "value": 1,
+              "display": "12%"
+            },
+            "name": "Joke3",
+            "value": "12"
+          },
+          {
+            "id": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+            "percent": {
+              "value": 1,
+              "display": "13%"
+            },
+            "name": "Joke4",
+            "value": "13"
+          },
+          {
+            "id": "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+            "percent": {
+              "value": 1,
+              "display": "12%"
+            },
+            "name": "Joke5",
+            "value": "12"
+          },
+          {
+            "id": "ffffffff-ffff-ffff-ffff-ffffffffffff",
+            "percent": {
+              "value": 1,
+              "display": "13%"
+            },
+            "name": "Joke6",
+            "value": "13"
+          },
+          {
+            "id": "12121212-1212-1212-1212-121212121212",
+            "percent": {
+              "value": 1,
+              "display": "12%"
+            },
+            "name": "Joke7",
+            "value": "12"
+          },
+          {
+            "id": "13131313-1313-1313-1313-131313131313",
+            "percent": {
+              "value": 1,
+              "display": "13%"
+            },
+            "name": "Joke8",
+            "value": "13"
+          }
+        ]
+      },
+      "33333333-3333-3333-3333-333333333333": {
+        "position": {
+          "x": 757.6,
+          "y": -150
+        },
+        "dynamicParams": []
+      },
+      "44444444-4444-4444-4444-444444444444": {
+        "position": {
+          "x": 804.8,
+          "y": 0
+        },
+        "dynamicParams": []
+      },
+      "55555555-5555-5555-5555-555555555555": {
+        "position": {
+          "x": 798.4,
+          "y": 150
+        },
+        "dynamicParams": []
+      },
+      "77777777-7777-7777-7777-777777777777": {
+        "position": {
+          "x": 798.4,
+          "y": 300
+        },
+        "dynamicParams": []
+      },
+      "88888888-8888-8888-8888-888888888888": {
+        "position": {
+          "x": 798.4,
+          "y": 450
+        },
+        "dynamicParams": []
+      },
+      "99999999-9999-9999-9999-999999999999": {
+        "position": {
+          "x": 798.4,
+          "y": 600
+        },
+        "dynamicParams": []
+      },
+      "aaaa1111-aaaa-1111-aaaa-111111111111": {
+        "position": {
+          "x": 798.4,
+          "y": 750
+        },
+        "dynamicParams": []
+      },
+      "bbbb2222-bbbb-2222-bbbb-222222222222": {
+        "position": {
+          "x": 798.4,
+          "y": 900
+        },
+        "dynamicParams": []
+      },
+      "66666666-6666-6666-6666-666666666666": {
+        "position": {
+          "x": 1206.4,
+          "y": 400
+        }
+      }
+    },
+    "Annotations": [],
+    "name": "TellMeAJoke",
+    "description": "This tool retrieves a random joke that can be used to lighten the mood during customer interactions. The jokes are family-friendly and appropriate for professional customer service contexts.",
+    "status": "published",
+    "settings": {
+      "input": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "description": "Optional category filter. Valid values: contact-center, animal, science, pun, food, tech, or leave empty for random"
+            }
+          },
+          "required": []
+        }
+      },
+      "resultData": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "success": {
+              "type": "boolean",
+              "description": "Whether the joke was successfully retrieved"
+            },
+            "joke": {
+              "type": "string",
+              "description": "The complete joke text"
+            },
+            "category": {
+              "type": "string",
+              "description": "The category the joke belongs to"
+            }
+          },
+          "required": []
+        }
+      },
+      "transitions": {
+        "results": []
+      }
+    },
+    "hash": {}
+  },
+  "Actions": [
+    {
+      "Parameters": {
+        "FlowLoggingBehavior": "Enabled"
+      },
+      "Identifier": "11111111-1111-1111-1111-111111111111",
+      "Type": "UpdateFlowLoggingBehavior",
+      "Transitions": {
+        "NextAction": "22222222-2222-2222-2222-222222222222"
+      }
+    },
+    {
+      "Parameters": {},
+      "Identifier": "22222222-2222-2222-2222-222222222222",
+      "Type": "DistributeByPercentage",
+      "Transitions": {
+        "NextAction": "33333333-3333-3333-3333-333333333333",
+        "Conditions": [
+          {
+            "NextAction": "33333333-3333-3333-3333-333333333333",
+            "Condition": {
+              "Operator": "NumberLessThan",
+              "Operands": [
+                "13"
+              ]
+            }
+          },
+          {
+            "NextAction": "44444444-4444-4444-4444-444444444444",
+            "Condition": {
+              "Operator": "NumberLessThan",
+              "Operands": [
+                "26"
+              ]
+            }
+          },
+          {
+            "NextAction": "55555555-5555-5555-5555-555555555555",
+            "Condition": {
+              "Operator": "NumberLessThan",
+              "Operands": [
+                "38"
+              ]
+            }
+          },
+          {
+            "NextAction": "77777777-7777-7777-7777-777777777777",
+            "Condition": {
+              "Operator": "NumberLessThan",
+              "Operands": [
+                "51"
+              ]
+            }
+          },
+          {
+            "NextAction": "88888888-8888-8888-8888-888888888888",
+            "Condition": {
+              "Operator": "NumberLessThan",
+              "Operands": [
+                "63"
+              ]
+            }
+          },
+          {
+            "NextAction": "99999999-9999-9999-9999-999999999999",
+            "Condition": {
+              "Operator": "NumberLessThan",
+              "Operands": [
+                "76"
+              ]
+            }
+          },
+          {
+            "NextAction": "aaaa1111-aaaa-1111-aaaa-111111111111",
+            "Condition": {
+              "Operator": "NumberLessThan",
+              "Operands": [
+                "88"
+              ]
+            }
+          },
+          {
+            "NextAction": "bbbb2222-bbbb-2222-bbbb-222222222222",
+            "Condition": {
+              "Operator": "NumberLessThan",
+              "Operands": [
+                "100"
+              ]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "NextAction": "33333333-3333-3333-3333-333333333333",
+            "ErrorType": "NoMatchingCondition"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {
+        "Attributes": {
+          "joke": "Why did the contact center agent bring a ladder to work? Because they heard the call volume was through the roof!",
+          "category": "contact-center"
+        },
+        "TargetContact": "Current"
+      },
+      "Identifier": "33333333-3333-3333-3333-333333333333",
+      "Type": "UpdateContactAttributes",
+      "Transitions": {
+        "NextAction": "66666666-6666-6666-6666-666666666666",
+        "Errors": [
+          {
+            "NextAction": "66666666-6666-6666-6666-666666666666",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {
+        "Attributes": {
+          "joke": "Why did the customer put their phone in the freezer? They wanted to make a cold call!",
+          "category": "contact-center"
+        },
+        "TargetContact": "Current"
+      },
+      "Identifier": "44444444-4444-4444-4444-444444444444",
+      "Type": "UpdateContactAttributes",
+      "Transitions": {
+        "NextAction": "66666666-6666-6666-6666-666666666666",
+        "Errors": [
+          {
+            "NextAction": "66666666-6666-6666-6666-666666666666",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {
+        "Attributes": {
+          "joke": "What do you call a bear with no teeth? A gummy bear!",
+          "category": "animal"
+        },
+        "TargetContact": "Current"
+      },
+      "Identifier": "55555555-5555-5555-5555-555555555555",
+      "Type": "UpdateContactAttributes",
+      "Transitions": {
+        "NextAction": "66666666-6666-6666-6666-666666666666",
+        "Errors": [
+          {
+            "NextAction": "66666666-6666-6666-6666-666666666666",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {
+        "Attributes": {
+          "joke": "Why don't scientists trust atoms? Because they make up everything!",
+          "category": "science"
+        },
+        "TargetContact": "Current"
+      },
+      "Identifier": "77777777-7777-7777-7777-777777777777",
+      "Type": "UpdateContactAttributes",
+      "Transitions": {
+        "NextAction": "66666666-6666-6666-6666-666666666666",
+        "Errors": [
+          {
+            "NextAction": "66666666-6666-6666-6666-666666666666",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {
+        "Attributes": {
+          "joke": "Why did the scarecrow win an award? Because he was outstanding in his field!",
+          "category": "pun"
+        },
+        "TargetContact": "Current"
+      },
+      "Identifier": "88888888-8888-8888-8888-888888888888",
+      "Type": "UpdateContactAttributes",
+      "Transitions": {
+        "NextAction": "66666666-6666-6666-6666-666666666666",
+        "Errors": [
+          {
+            "NextAction": "66666666-6666-6666-6666-666666666666",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {
+        "Attributes": {
+          "joke": "Why did the hold music go to therapy? It had too many unresolved issues!",
+          "category": "contact-center"
+        },
+        "TargetContact": "Current"
+      },
+      "Identifier": "99999999-9999-9999-9999-999999999999",
+      "Type": "UpdateContactAttributes",
+      "Transitions": {
+        "NextAction": "66666666-6666-6666-6666-666666666666",
+        "Errors": [
+          {
+            "NextAction": "66666666-6666-6666-6666-666666666666",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {
+        "Attributes": {
+          "joke": "What do you call a fake noodle? An impasta!",
+          "category": "food"
+        },
+        "TargetContact": "Current"
+      },
+      "Identifier": "aaaa1111-aaaa-1111-aaaa-111111111111",
+      "Type": "UpdateContactAttributes",
+      "Transitions": {
+        "NextAction": "66666666-6666-6666-6666-666666666666",
+        "Errors": [
+          {
+            "NextAction": "66666666-6666-6666-6666-666666666666",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {
+        "Attributes": {
+          "joke": "Why do programmers prefer dark mode? Because light attracts bugs!",
+          "category": "tech"
+        },
+        "TargetContact": "Current"
+      },
+      "Identifier": "bbbb2222-bbbb-2222-bbbb-222222222222",
+      "Type": "UpdateContactAttributes",
+      "Transitions": {
+        "NextAction": "66666666-6666-6666-6666-666666666666",
+        "Errors": [
+          {
+            "NextAction": "66666666-6666-6666-6666-666666666666",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {
+        "ResultData": {
+          "success": true,
+          "joke": "$.Attributes.joke",
+          "category": "$.Attributes.category"
+        }
+      },
+      "Identifier": "66666666-6666-6666-6666-666666666666",
+      "Type": "EndFlowModuleExecution",
+      "Transitions": {}
+    }
+  ],
+  "Settings": {
+    "InputParameters": [],
+    "OutputParameters": [],
+    "Transitions": [
+      {
+        "DisplayName": "Success",
+        "ReferenceName": "Success",
+        "Description": ""
+      },
+      {
+        "DisplayName": "Error",
+        "ReferenceName": "Error",
+        "Description": ""
+      }
+    ]
+  }
+}

@@ -1,0 +1,83 @@
+ARCHITECTURE OVERVIEW - Hotel Self-Service AI Agent
+Generated: 2026-05-11T14:13:17.120472
+
+=== COMPONENT MAP ===
+
+AWS Connect Instance
+  ID:    6f93dfc3-9503-4b86-971b-f608ec484e78
+  Alias: amazon-connect-610639371721-0e9e2ddb4515
+  URL:   https://amazon-connect-610639371721-0e9e2ddb4515.my.connect.aws
+
+Contact Flow: Self Service Test Flow
+  ID:    758b182f-afad-4321-acbe-9d8a178c9ae2
+  Chain: Logging → CreateWisdomSession → SetSessionArn
+         → SetVoice(Generative/Matthew) → ConnectParticipantWithLexBot
+
+Lex Bot: hotel-SelfServiceBot
+  Bot ID:  YBI14PGD3E
+  Alias:   TestBotAlias (TSTALIASID) → DRAFT
+  Speech:  Nova Sonic (amazon.nova-2-sonic-v1:0) - speech-to-speech
+  Intents:
+    AmazonQinConnect (1SCC6HWXUT)  ← main intent, routes to AI Agent
+    FallbackIntent   (FALLBCKINT)  ← catch-all
+
+Q Connect Assistant
+  ID:   d97929ca-a9c3-43ee-8562-c9272acb45e6
+  Name: connect-assistant-ai-agent-workshop-AssistantStack-1NCO40WI0FT99
+
+AI Agent: Hotel-Self-Service-Agent
+  ID:     5b8b33fd-f5f3-4b01-a5bb-7ae9dc69e7c2
+  Type:   ORCHESTRATION
+  Prompt: Hotel-Self-Service-Prompt v3 (6edfa19f-ebcb-4068-b077-87352e02bf31:3)
+  Model:  global.anthropic.claude-haiku-4-5-20251001-v1:0
+  Tools:
+    - Retrieve               (MCP - Knowledge Base search)
+    - cdf2_2fdf_405c...      (MCP - TellMeAJoke flow module)
+    - Hotel_API_Target___cancelReservation
+    - Hotel_API_Target___createBooking
+    - Hotel_API_Target___searchHotels
+    - Hotel_API_Target___modifyReservation
+    - Hotel_API_Target___getCustomerReservations
+    - Escalate               (RTC - transfer to human)
+    - Complete               (RTC - end conversation)
+
+AgentCore Gateway
+  Routes MCP tool calls to backend Hotel API
+
+Knowledge Base
+  Association: 6a2199fc-dcc3-41dd-8070-517577491b28
+
+=== CALL FLOW ===
+
+  Customer (voice) 
+    → Connect phone number
+    → Self Service Test Flow
+    → ConnectParticipantWithLexBot
+      [Greeting: "Hi my name is Abhay from S&P global how may I help you?"]
+    → Lex (Nova Sonic ASR: voice → text)
+    → AmazonQinConnect intent matched
+    → AI Agent (Hotel-Self-Service-Agent)
+      → Prompt v3 applied (Sunny persona, voice-friendly)
+      → Tool calls as needed (Hotel API / Knowledge Base)
+    → Nova Sonic TTS: text → speech (streaming)
+    → Back to customer
+    [Loop until Complete or Escalate]
+
+  On Complete:
+    → Goodbye message → DisconnectParticipant
+
+  On Escalate:
+    → UpdateContactAttributes (reason/summary/intent/sentiment)
+    → UpdateContactEventHooks → Agent Screen Pop flow
+    → UpdateContactTargetQueue → BasicQueue
+    → TransferContactToQueue
+
+=== KEY ARNs ===
+  AI Agent ARN (in flow):
+    arn:aws:wisdom:us-east-1:610639371721:ai-agent/d97929ca-a9c3-43ee-8562-c9272acb45e6/5b8b33fd-f5f3-4b01-a5bb-7ae9dc69e7c2:$LATEST
+  
+  Lex Bot Alias ARN:
+    arn:aws:lex:us-east-1:610639371721:bot-alias/YBI14PGD3E/TSTALIASID
+
+  Q Connect Assistant ARN:
+    arn:aws:wisdom:us-east-1:610639371721:assistant/d97929ca-a9c3-43ee-8562-c9272acb45e6

@@ -1,0 +1,120 @@
+LATENCY DIAGNOSIS - hotel-SelfServiceBot
+Generated: 2026-05-11T14:13:17.120472
+
+=== OBSERVED SYMPTOM ===
+4-5 seconds of silence after customer speaks before AI Agent responds.
+
+=== ROOT CAUSE ANALYSIS ===
+
+1. WHY Lex fulfillmentUpdates FILLER DOES NOT WORK
+   ------------------------------------------------
+   Config: AmazonQinConnect intent fulfillmentUpdatesSpecification.startResponse
+     - message: "Sure, one moment please."
+     - delayInSeconds: 1
+     - active: True
+   
+   BUT: fulfillmentCodeHook.enabled = False  ← BLOCKING CONDITION
+   
+   The fulfillmentUpdatesSpecification (startResponse filler) ONLY fires when
+   fulfillmentCodeHook.enabled = True AND a Lambda is backing the fulfillment.
+   
+   For AMAZON.QInConnectIntent, Q in Connect handles fulfillment internally.
+   The API does NOT allow setting fulfillmentCodeHook.enabled = True for this
+   intent type (returns ValidationException if attempted).
+   
+   CONCLUSION: Lex filler words are architecturally impossible for this intent type.
+
+1b. WHY Lex initialResponseSetting ALSO DOES NOT WORK
+    --------------------------------------------------
+    Attempted: add initialResponseSetting to AmazonQinConnect so Lex would speak
+    before Q in Connect orchestration starts processing the turn.
+
+    Result: the UpdateIntent call succeeds, but the subsequent bot-locale build
+    fails with the service error:
+       "Q In Connect intent 'AmazonQinConnect' contains initial response
+         configurations. Initial response configurations are not allowed in
+         Q In Connect intent."
+
+    CONCLUSION: AmazonQinConnect does not support Lex initialResponseSetting.
+    This closes off both Lex filler mechanisms:
+       - fulfillmentUpdatesSpecification: blocked by fulfillmentCodeHook.enabled=False
+       - initialResponseSetting: blocked by Q In Connect build validation
+
+2. WHY THE AI AGENT PROMPT PRE-TOOL ACKNOWLEDGMENT SHOULD WORK (but may not)
+   --------------------------------------------------------------------------
+   Prompt v3 contains:
+     "CRITICAL FOR VOICE (Nova Sonic streaming): You MUST output a short spoken
+      acknowledgment in a <message> block BEFORE invoking ANY tool."
+   
+   With Nova Sonic speech-to-speech streaming, IF the AI model outputs tokens
+   for the acknowledgment before calling a tool, Nova Sonic will stream that
+   audio immediately. This is the intended fix.
+   
+   POTENTIAL ISSUE: Claude Haiku may be ignoring/reordering the instruction
+   and calling the tool before generating the acknowledgment, especially for
+   simple/short queries where it determines a tool call is the first action.
+
+3. THE COLD-START / INITIAL SILENCE
+   ----------------------------------
+   Flow execution timeline (from CloudWatch logs):
+     T+0.000s  SetLoggingBehavior
+     T+0.013s  CreateWisdomSession (starts)
+     T+0.621s  CreateWisdomSession (completes) - 608ms
+     T+0.716s  SetContactData
+     T+0.789s  SetVoice (Generative/Matthew)
+     T+0.800s  ConnectParticipantWithLexBot (Lex + greeting plays)
+     
+   Greeting ("Hi my name is Abhay...") plays ~T+0.8s ✅ - this is fast
+   
+   The 4-5s SILENCE is AFTER the customer speaks, while:
+     - Nova Sonic converts speech to text
+     - AI Agent LLM (Claude Haiku) processes the request
+     - Tool calls execute (Hotel API or Knowledge Base)
+     - Nova Sonic converts response to speech
+   
+   This is NOT a flow/config issue - it is LLM + tool call processing latency.
+
+4. WHY CONNECT FLOW CANNOT INSERT A PER-TURN ACKNOWLEDGMENT HERE
+    --------------------------------------------------------------
+    The active flow uses ConnectParticipantWithLexBot with:
+       - Text: the initial greeting spoken once when the bot session starts
+       - LexSessionAttributes: audio timing and q-in-connect agent ARN wiring
+
+    The flow regains control only after the Lex/Q in Connect session resolves
+    and exits back to the next flow branch. There is no flow action between an
+    individual caller utterance and the corresponding AmazonQinConnect tool turn.
+
+    CONCLUSION: the current Connect flow can guarantee the opening greeting, but
+    it cannot inject a per-turn acknowledgment before orchestration starts work.
+
+=== WHAT IS ACTUALLY WORKING ===
+  ✅ Nova Sonic speech-to-speech enabled (amazon.nova-2-sonic-v1:0)
+  ✅ Contact flow clean (no duplicate CreateWisdomSession)
+  ✅ AI Prompt v3 deployed with pre-tool acknowledgment instruction
+  ✅ FallbackIntent has initialResponse "Got it! Let me look into that for you."
+  ✅ Lex bot status: Built
+  ✅ AI Agent pointing to Prompt v3
+  ✅ TTS engine: Generative (aligned with Nova Sonic)
+
+=== WHAT IS NOT WORKING ===
+  ❌ Lex fulfillmentUpdates filler - blocked by fulfillmentCodeHook.enabled=False
+     (this is an API constraint for QInConnect intents, cannot be fixed)
+  ❌ Lex initialResponseSetting - explicitly rejected by Lex build validation for
+     AMAZON.QInConnectIntent
+  ❌ Connect flow per-turn filler - ConnectParticipantWithLexBot does not expose
+     a mid-turn playback hook before orchestration/tool processing
+  ⚠️  AI Agent pre-tool acknowledgment - configured in prompt but may not be
+     streaming before tool calls in practice
+
+=== RECOMMENDED NEXT STEPS ===
+  1. If immediate speech before every tool turn is a hard requirement, rework
+     the voice path away from AmazonQinConnect/ConnectParticipantWithLexBot to
+     a custom loop that owns playback before backend/tool execution.
+  2. If the current architecture must stay, treat prompt-side acknowledgments as
+     best-effort only and focus on shrinking the actual tool/inference time.
+  3. The theoretical minimum latency for this architecture:
+     - Nova Sonic ASR: ~200-500ms
+     - LLM first-token: ~500-1000ms  
+     - Tool call: ~500-2000ms (API call)
+     - Nova Sonic TTS streaming: starts immediately on first token
+     Total: 1.2s - 3.5s is the realistic minimum

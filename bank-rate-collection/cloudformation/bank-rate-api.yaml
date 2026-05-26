@@ -1,0 +1,1239 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Bank Rate Collection API — API Gateway + Lambda + DynamoDB for S&P Global Ratewatch.
+  Provides REST endpoints that the Ryan AI agent calls to store bank deposit rates
+  (CDs, Money Market, IRA, Savings, Checking, Specials, Callbacks, DNC, M&A).
+
+# =============================================================================
+# PARAMETERS
+# =============================================================================
+Parameters:
+
+  SeedDataUrl:
+    Type: String
+    Description: >-
+      URL (HTTPS or s3://) to the bank seed data JSON file.
+      Used to pre-populate the BanksTable on stack creation.
+    Default: ''
+
+  OpenApiSpecUrl:
+    Type: String
+    Description: >-
+      URL (HTTPS or s3://) to the bank-rate-api-openapi.yaml file.
+      The spec is stored in S3 and referenced by the AgentCore Gateway target.
+    Default: ''
+
+  SharedApiKeyId:
+    Type: String
+    Description: >-
+      (Optional) ID of a shared API Gateway key from another stack.
+      When provided this stack creates a usage plan linked to that key
+      instead of creating its own.
+    Default: ''
+
+# =============================================================================
+# CONDITIONS
+# =============================================================================
+Conditions:
+  UseSharedApiKey: !Not [!Equals [!Ref SharedApiKeyId, '']]
+  CreateOwnApiKey: !Equals [!Ref SharedApiKeyId, '']
+
+# =============================================================================
+# RESOURCES
+# =============================================================================
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # CloudWatch Log Groups
+  # ---------------------------------------------------------------------------
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/apigateway/${AWS::StackName}-bank-rate'
+      RetentionInDays: 7
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+    DeletionPolicy: Delete
+
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-bank-rate-api'
+      RetentionInDays: 7
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+    DeletionPolicy: Delete
+
+  # ---------------------------------------------------------------------------
+  # API Gateway CloudWatch Role
+  # ---------------------------------------------------------------------------
+  ApiGatewayCloudWatchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: apigateway.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+    DeletionPolicy: Delete
+
+  ApiGatewayAccount:
+    Type: AWS::ApiGateway::Account
+    Properties:
+      CloudWatchRoleArn: !GetAtt ApiGatewayCloudWatchRole.Arn
+
+  # ---------------------------------------------------------------------------
+  # DynamoDB Tables
+  # ---------------------------------------------------------------------------
+
+  # Banks reference table (seeded from bank-seed-data.json)
+  BanksTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - {AttributeName: bankId,   AttributeType: S}
+        - {AttributeName: state,    AttributeType: S}
+      KeySchema:
+        - {AttributeName: bankId,   KeyType: HASH}
+      GlobalSecondaryIndexes:
+        - IndexName: StateIndex
+          KeySchema:
+            - {AttributeName: state, KeyType: HASH}
+          Projection: {ProjectionType: ALL}
+      BillingMode: PAY_PER_REQUEST
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+    DeletionPolicy: Delete
+
+  # Call sessions — one record per outbound call
+  CallSessionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - {AttributeName: sessionId,   AttributeType: S}
+        - {AttributeName: phoneNumber, AttributeType: S}
+      KeySchema:
+        - {AttributeName: sessionId, KeyType: HASH}
+      GlobalSecondaryIndexes:
+        - IndexName: PhoneIndex
+          KeySchema:
+            - {AttributeName: phoneNumber, KeyType: HASH}
+          Projection: {ProjectionType: ALL}
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+    DeletionPolicy: Delete
+
+  # Rates table — one record per (sessionId, productType) combination
+  BankRatesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - {AttributeName: sessionId,   AttributeType: S}
+        - {AttributeName: productType, AttributeType: S}
+      KeySchema:
+        - {AttributeName: sessionId,   KeyType: HASH}
+        - {AttributeName: productType, KeyType: RANGE}
+      BillingMode: PAY_PER_REQUEST
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+    DeletionPolicy: Delete
+
+  # Callbacks table
+  CallbacksTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - {AttributeName: sessionId, AttributeType: S}
+      KeySchema:
+        - {AttributeName: sessionId, KeyType: HASH}
+      BillingMode: PAY_PER_REQUEST
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+    DeletionPolicy: Delete
+
+  # Do Not Call registry
+  DNCTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - {AttributeName: phoneNumber, AttributeType: S}
+      KeySchema:
+        - {AttributeName: phoneNumber, KeyType: HASH}
+      BillingMode: PAY_PER_REQUEST
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+    DeletionPolicy: Delete
+
+  # Merger / Acquisition events
+  MergerAcquisitionTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - {AttributeName: sessionId, AttributeType: S}
+      KeySchema:
+        - {AttributeName: sessionId, KeyType: HASH}
+      BillingMode: PAY_PER_REQUEST
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+    DeletionPolicy: Delete
+
+  # ---------------------------------------------------------------------------
+  # IAM — Lambda Execution Role
+  # ---------------------------------------------------------------------------
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudWatchLogsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub '${LambdaLogGroup.Arn}:*'
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt BanksTable.Arn
+                  - !Sub '${BanksTable.Arn}/index/*'
+                  - !GetAtt CallSessionsTable.Arn
+                  - !Sub '${CallSessionsTable.Arn}/index/*'
+                  - !GetAtt BankRatesTable.Arn
+                  - !GetAtt CallbacksTable.Arn
+                  - !GetAtt DNCTable.Arn
+                  - !GetAtt MergerAcquisitionTable.Arn
+        - PolicyName: XRayAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [xray:PutTraceSegments, xray:PutTelemetryRecords]
+                Resource: '*'
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+    DeletionPolicy: Delete
+
+  # ---------------------------------------------------------------------------
+  # Lambda — Bank Rate Collection API Handler
+  # ---------------------------------------------------------------------------
+  BankRateApiFn:
+    Type: AWS::Lambda::Function
+    DependsOn: LambdaLogGroup
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-bank-rate-api'
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      TracingConfig: {Mode: Active}
+      LoggingConfig:
+        LogGroup: !Ref LambdaLogGroup
+        LogFormat: JSON
+      Environment:
+        Variables:
+          BANKS_TABLE:       !Ref BanksTable
+          SESSIONS_TABLE:    !Ref CallSessionsTable
+          RATES_TABLE:       !Ref BankRatesTable
+          CALLBACKS_TABLE:   !Ref CallbacksTable
+          DNC_TABLE:         !Ref DNCTable
+          MA_TABLE:          !Ref MergerAcquisitionTable
+          SESSION_TTL_DAYS:  '90'
+      Code:
+        ZipFile: |
+          const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+          const {
+            DynamoDBDocumentClient,
+            GetCommand, PutCommand, UpdateCommand, QueryCommand
+          } = require('@aws-sdk/lib-dynamodb');
+          const { randomUUID } = require('crypto');
+
+          const client = new DynamoDBClient({});
+          const db     = DynamoDBDocumentClient.from(client);
+
+          const BANKS_TABLE     = process.env.BANKS_TABLE;
+          const SESSIONS_TABLE  = process.env.SESSIONS_TABLE;
+          const RATES_TABLE     = process.env.RATES_TABLE;
+          const CALLBACKS_TABLE = process.env.CALLBACKS_TABLE;
+          const DNC_TABLE       = process.env.DNC_TABLE;
+          const MA_TABLE        = process.env.MA_TABLE;
+          const TTL_DAYS        = parseInt(process.env.SESSION_TTL_DAYS || '90', 10);
+
+          function ttlTs() {
+            return Math.floor(Date.now() / 1000) + TTL_DAYS * 86400;
+          }
+
+          function respond(statusCode, body) {
+            return {
+              statusCode,
+              headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+              body: JSON.stringify(body)
+            };
+          }
+
+          function badRequest(msg, details) {
+            return respond(400, { error: msg, code: 'INVALID_PARAMETERS', details: details || '' });
+          }
+
+          function notFound(msg) {
+            return respond(404, { error: msg, code: 'NOT_FOUND' });
+          }
+
+          // ── Route dispatcher ───────────────────────────────────────────────
+          exports.handler = async (event) => {
+            console.log('Event:', JSON.stringify(event, null, 2));
+            const method = event.httpMethod || '';
+            const path   = event.path || '';
+            const body   = event.body ? JSON.parse(event.body) : {};
+            const pathParams = event.pathParameters || {};
+
+            try {
+              // POST /sessions
+              if (method === 'POST' && path === '/sessions') return startCallSession(body);
+              // GET  /sessions/{sessionId}
+              if (method === 'GET'  && path.startsWith('/sessions/')) return getCallSession(pathParams.sessionId);
+              // POST /sessions/{sessionId}/close
+              if (method === 'POST' && path.startsWith('/sessions/') && path.endsWith('/close'))
+                return closeCallSession(pathParams.sessionId, body);
+              // POST /rates/cd
+              if (method === 'POST' && path === '/rates/cd') return submitCDRates(body);
+              // POST /rates/money-market
+              if (method === 'POST' && path === '/rates/money-market') return submitMoneyMarketRates(body);
+              // POST /rates/ira
+              if (method === 'POST' && path === '/rates/ira') return submitIRARates(body);
+              // POST /rates/savings
+              if (method === 'POST' && path === '/rates/savings') return submitSavingsRates(body);
+              // POST /rates/checking
+              if (method === 'POST' && path === '/rates/checking') return submitCheckingRates(body);
+              // POST /rates/specials
+              if (method === 'POST' && path === '/rates/specials') return submitSpecial(body);
+              // POST /callbacks
+              if (method === 'POST' && path === '/callbacks') return scheduleCallback(body);
+              // POST /dnc
+              if (method === 'POST' && path === '/dnc') return markDNC(body);
+              // POST /merger-acquisition
+              if (method === 'POST' && path === '/merger-acquisition') return recordMergerAcquisition(body);
+
+              return respond(404, { error: 'Route not found', path, method });
+            } catch (err) {
+              console.error('Handler error:', err);
+              return respond(500, { error: 'Internal server error', details: err.message });
+            }
+          };
+
+          // ── Session handlers ───────────────────────────────────────────────
+          async function startCallSession(body) {
+            if (!body.bankName || !body.phoneNumber) {
+              return badRequest('bankName and phoneNumber are required');
+            }
+            const sessionId = randomUUID();
+            const now = new Date().toISOString();
+            await db.send(new PutCommand({
+              TableName: SESSIONS_TABLE,
+              Item: {
+                sessionId,
+                bankName:       body.bankName,
+                phoneNumber:    body.phoneNumber,
+                contactId:      body.contactId || null,
+                status:         'in-progress',
+                collectedProducts: [],
+                startTime:      now,
+                ttl:            ttlTs()
+              }
+            }));
+            return respond(200, { success: true, sessionId, message: 'Session started' });
+          }
+
+          async function getCallSession(sessionId) {
+            if (!sessionId) return badRequest('sessionId is required');
+            const res = await db.send(new GetCommand({ TableName: SESSIONS_TABLE, Key: { sessionId } }));
+            if (!res.Item) return notFound(`Session ${sessionId} not found`);
+            return respond(200, res.Item);
+          }
+
+          async function closeCallSession(sessionId, body) {
+            if (!sessionId) return badRequest('sessionId is required');
+            if (!body.completionType || !body.bankerName) {
+              return badRequest('completionType and bankerName are required');
+            }
+            await db.send(new UpdateCommand({
+              TableName: SESSIONS_TABLE,
+              Key: { sessionId },
+              UpdateExpression: 'SET #s = :s, bankerName = :bn, endTime = :et',
+              ExpressionAttributeNames: { '#s': 'status' },
+              ExpressionAttributeValues: {
+                ':s':  body.completionType,
+                ':bn': body.bankerName,
+                ':et': new Date().toISOString()
+              }
+            }));
+            return respond(200, { success: true, sessionId, message: `Session closed as ${body.completionType}` });
+          }
+
+          // ── Rate submission helpers ────────────────────────────────────────
+          async function storeRates(sessionId, productType, data) {
+            await db.send(new PutCommand({
+              TableName: RATES_TABLE,
+              Item: { sessionId, productType, ...data, submittedAt: new Date().toISOString() }
+            }));
+            // Mark product as collected in the session
+            await db.send(new UpdateCommand({
+              TableName: SESSIONS_TABLE,
+              Key: { sessionId },
+              UpdateExpression: 'SET collectedProducts = list_append(if_not_exists(collectedProducts, :empty), :p)',
+              ExpressionAttributeValues: { ':p': [productType], ':empty': [] }
+            }));
+            return respond(200, { success: true, sessionId, productType, message: `${productType} rates stored successfully` });
+          }
+
+          async function submitCDRates(body) {
+            if (!body.sessionId || !body.tier) return badRequest('sessionId and tier are required');
+            const productType = body.tier === 'jumbo_100k' ? 'cd_jumbo' : 'cd_standard';
+            return storeRates(body.sessionId, productType, {
+              tier:                     body.tier,
+              rates:                    body.rates || [],
+              minimumAbove10k:          body.minimumAbove10k || false,
+              jumboDiffersFromStandard: body.jumboDiffersFromStandard !== false,
+              formula:                  body.formula || null
+            });
+          }
+
+          async function submitMoneyMarketRates(body) {
+            if (!body.sessionId || !body.mmType) return badRequest('sessionId and mmType are required');
+            const productType = body.mmType === 'relationship' ? 'mm_relationship' : 'mm_standard';
+            return storeRates(body.sessionId, productType, {
+              mmType:                body.mmType,
+              productName:           body.productName || null,
+              minimumDeposit:        body.minimumDeposit || null,
+              tiers:                 body.tiers || [],
+              relationshipReq:       body.relationshipRequirement || null,
+              flatRateAllBalances:   body.flatRateAllBalances || false,
+              notOffered:            body.notOffered || false
+            });
+          }
+
+          async function submitIRARates(body) {
+            if (!body.sessionId || !body.iraType) return badRequest('sessionId and iraType are required');
+            const productType = body.iraType === 'fixed_12mo' ? 'ira_fixed' : 'ira_liquid';
+            return storeRates(body.sessionId, productType, {
+              iraType:       body.iraType,
+              depositAmount: body.depositAmount || 10000,
+              rate:          body.rate || null,
+              apy:           body.apy || null,
+              rateEqualsApy: body.rateEqualsApy || false,
+              notOffered:    body.notOffered || false
+            });
+          }
+
+          async function submitSavingsRates(body) {
+            if (!body.sessionId) return badRequest('sessionId is required');
+            return storeRates(body.sessionId, 'savings', {
+              depositAmount: body.depositAmount || 2500,
+              rate:          body.rate || null,
+              apy:           body.apy || null,
+              rateEqualsApy: body.rateEqualsApy || false,
+              notOffered:    body.notOffered || false
+            });
+          }
+
+          async function submitCheckingRates(body) {
+            if (!body.sessionId) return badRequest('sessionId is required');
+            return storeRates(body.sessionId, 'checking', {
+              depositAmount: body.depositAmount || 2500,
+              rate:          body.rate || null,
+              apy:           body.apy || null,
+              rateEqualsApy: body.rateEqualsApy || false,
+              notOffered:    body.notOffered || false
+            });
+          }
+
+          async function submitSpecial(body) {
+            if (!body.sessionId || !body.productType || !body.term) {
+              return badRequest('sessionId, productType, and term are required');
+            }
+            // Store specials as list — key includes a timestamp suffix for uniqueness
+            const productType = `special_${Date.now()}`;
+            return storeRates(body.sessionId, productType, {
+              specialProductType:       body.productType,
+              term:                     body.term,
+              rate:                     body.rate,
+              apy:                      body.apy,
+              minimumDeposit:           body.minimumDeposit,
+              maximumDeposit:           body.maximumDeposit || null,
+              qualificationRequirements: body.qualificationRequirements || null,
+              iraApplicable:            body.iraApplicable || false
+            });
+          }
+
+          async function scheduleCallback(body) {
+            if (!body.sessionId || !body.bankerName || !body.callbackTime) {
+              return badRequest('sessionId, bankerName, and callbackTime are required');
+            }
+            await db.send(new PutCommand({
+              TableName: CALLBACKS_TABLE,
+              Item: {
+                sessionId:    body.sessionId,
+                bankerName:   body.bankerName,
+                callbackTime: body.callbackTime,
+                phoneNumber:  body.phoneNumber || null,
+                requestedAt:  new Date().toISOString()
+              }
+            }));
+            await db.send(new UpdateCommand({
+              TableName: SESSIONS_TABLE,
+              Key: { sessionId: body.sessionId },
+              UpdateExpression: 'SET #s = :s',
+              ExpressionAttributeNames: { '#s': 'status' },
+              ExpressionAttributeValues: { ':s': 'callback_scheduled' }
+            }));
+            return respond(200, {
+              success: true,
+              sessionId: body.sessionId,
+              message: `Callback scheduled for ${body.bankerName} at ${body.callbackTime}`
+            });
+          }
+
+          async function markDNC(body) {
+            if (!body.sessionId || !body.phoneNumber) {
+              return badRequest('sessionId and phoneNumber are required');
+            }
+            await db.send(new PutCommand({
+              TableName: DNC_TABLE,
+              Item: {
+                phoneNumber: body.phoneNumber,
+                sessionId:   body.sessionId,
+                bankerName:  body.bankerName || null,
+                addedAt:     new Date().toISOString()
+              }
+            }));
+            await db.send(new UpdateCommand({
+              TableName: SESSIONS_TABLE,
+              Key: { sessionId: body.sessionId },
+              UpdateExpression: 'SET #s = :s',
+              ExpressionAttributeNames: { '#s': 'status' },
+              ExpressionAttributeValues: { ':s': 'dnc' }
+            }));
+            return respond(200, {
+              success: true,
+              sessionId: body.sessionId,
+              message: `${body.phoneNumber} added to DNC list`
+            });
+          }
+
+          async function recordMergerAcquisition(body) {
+            if (!body.sessionId) return badRequest('sessionId is required');
+            await db.send(new PutCommand({
+              TableName: MA_TABLE,
+              Item: {
+                sessionId:           body.sessionId,
+                acquiringBank:       body.acquiringBank || null,
+                continuationStatus:  body.continuationStatus || 'unknown',
+                timeline:            body.timeline || null,
+                bankerName:          body.bankerName || null,
+                additionalNotes:     body.additionalNotes || null,
+                recordedAt:          new Date().toISOString()
+              }
+            }));
+            return respond(200, {
+              success: true,
+              sessionId: body.sessionId,
+              message: 'Merger/acquisition event recorded'
+            });
+          }
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+    DeletionPolicy: Delete
+
+  # ---------------------------------------------------------------------------
+  # API Gateway
+  # ---------------------------------------------------------------------------
+  BankRateApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub '${AWS::StackName}-bank-rate-api'
+      Description: Bank Rate Collection REST API for S&P Global Ratewatch Ryan agent
+      EndpointConfiguration: {Types: [REGIONAL]}
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+
+  # Lambda permission for API Gateway
+  ApiGatewayInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt BankRateApiFn.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${BankRateApi}/*'
+
+  # /sessions resource
+  SessionsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ParentId: !GetAtt BankRateApi.RootResourceId
+      PathPart: sessions
+
+  SessionsPost:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ResourceId: !Ref SessionsResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${BankRateApiFn.Arn}/invocations'
+
+  SessionIdResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ParentId: !Ref SessionsResource
+      PathPart: '{sessionId}'
+
+  SessionIdGet:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ResourceId: !Ref SessionIdResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${BankRateApiFn.Arn}/invocations'
+
+  CloseResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ParentId: !Ref SessionIdResource
+      PathPart: close
+
+  ClosePost:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ResourceId: !Ref CloseResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${BankRateApiFn.Arn}/invocations'
+
+  # /rates resource tree
+  RatesResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ParentId: !GetAtt BankRateApi.RootResourceId
+      PathPart: rates
+
+  RatesCdResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ParentId: !Ref RatesResource
+      PathPart: cd
+
+  RatesCdPost:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ResourceId: !Ref RatesCdResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${BankRateApiFn.Arn}/invocations'
+
+  RatesMMResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ParentId: !Ref RatesResource
+      PathPart: money-market
+
+  RatesMMPost:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ResourceId: !Ref RatesMMResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${BankRateApiFn.Arn}/invocations'
+
+  RatesIraResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ParentId: !Ref RatesResource
+      PathPart: ira
+
+  RatesIraPost:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ResourceId: !Ref RatesIraResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${BankRateApiFn.Arn}/invocations'
+
+  RatesSavingsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ParentId: !Ref RatesResource
+      PathPart: savings
+
+  RatesSavingsPost:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ResourceId: !Ref RatesSavingsResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${BankRateApiFn.Arn}/invocations'
+
+  RatesCheckingResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ParentId: !Ref RatesResource
+      PathPart: checking
+
+  RatesCheckingPost:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ResourceId: !Ref RatesCheckingResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${BankRateApiFn.Arn}/invocations'
+
+  RatesSpecialsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ParentId: !Ref RatesResource
+      PathPart: specials
+
+  RatesSpecialsPost:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ResourceId: !Ref RatesSpecialsResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${BankRateApiFn.Arn}/invocations'
+
+  # /callbacks
+  CallbacksResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ParentId: !GetAtt BankRateApi.RootResourceId
+      PathPart: callbacks
+
+  CallbacksPost:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ResourceId: !Ref CallbacksResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${BankRateApiFn.Arn}/invocations'
+
+  # /dnc
+  DNCApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ParentId: !GetAtt BankRateApi.RootResourceId
+      PathPart: dnc
+
+  DNCPost:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ResourceId: !Ref DNCApiResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${BankRateApiFn.Arn}/invocations'
+
+  # /merger-acquisition
+  MAResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ParentId: !GetAtt BankRateApi.RootResourceId
+      PathPart: merger-acquisition
+
+  MAPost:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref BankRateApi
+      ResourceId: !Ref MAResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${BankRateApiFn.Arn}/invocations'
+
+  # Deployment
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - SessionsPost
+      - SessionIdGet
+      - ClosePost
+      - RatesCdPost
+      - RatesMMPost
+      - RatesIraPost
+      - RatesSavingsPost
+      - RatesCheckingPost
+      - RatesSpecialsPost
+      - CallbacksPost
+      - DNCPost
+      - MAPost
+    Properties:
+      RestApiId: !Ref BankRateApi
+      Description: 'Bank Rate Collection API deployment'
+
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref BankRateApi
+      DeploymentId: !Ref ApiDeployment
+      StageName: prod
+      AccessLogSetting:
+        DestinationArn: !GetAtt ApiLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","caller":"$context.identity.caller","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength"}'
+      MethodSettings:
+        - ResourcePath: '/*'
+          HttpMethod: '*'
+          LoggingLevel: INFO
+          MetricsEnabled: true
+      Tags:
+        Environment: NonProd
+        Name: BankRateCollection
+
+  # API Key (created when no shared key provided)
+  BankRateApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Condition: CreateOwnApiKey
+    Properties:
+      Name: !Sub '${AWS::StackName}-bank-rate-key'
+      Enabled: true
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+
+  # Usage Plan
+  BankRateUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      UsagePlanName: !Sub '${AWS::StackName}-bank-rate-plan'
+      ApiStages:
+        - ApiId: !Ref BankRateApi
+          Stage: !Ref ApiStage
+      Throttle:
+        RateLimit: 100
+        BurstLimit: 200
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+
+  # Link API key to usage plan
+  UsagePlanKeyOwn:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Condition: CreateOwnApiKey
+    Properties:
+      KeyId: !Ref BankRateApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref BankRateUsagePlan
+
+  UsagePlanKeyShared:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Condition: UseSharedApiKey
+    Properties:
+      KeyId: !Ref SharedApiKeyId
+      KeyType: API_KEY
+      UsagePlanId: !Ref BankRateUsagePlan
+
+  # ---------------------------------------------------------------------------
+  # Custom Resource — Retrieve API Key Value
+  # ---------------------------------------------------------------------------
+  ApiKeyRetrievalRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ApiGatewayReadKey
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: apigateway:GET
+                Resource: !Sub 'arn:aws:apigateway:${AWS::Region}::/apikeys/*'
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+    DeletionPolicy: Delete
+
+  ApiKeyRetrievalFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.13
+      Handler: index.handler
+      Role: !GetAtt ApiKeyRetrievalRole.Arn
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import json, boto3, cfnresponse
+
+          def handler(event, context):
+              data = {}
+              try:
+                  if event['RequestType'] == 'Delete':
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+                  key_id = event['ResourceProperties']['ApiKeyId']
+                  client = boto3.client('apigateway')
+                  resp   = client.get_api_key(apiKey=key_id, includeValue=True)
+                  data   = {'ApiKeyValue': resp['value']}
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, data)
+              except Exception as e:
+                  print(f"Error: {e}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+    DeletionPolicy: Delete
+
+  ApiKeyValueRetrieval:
+    Type: AWS::CloudFormation::CustomResource
+    Condition: CreateOwnApiKey
+    Properties:
+      ServiceToken: !GetAtt ApiKeyRetrievalFn.Arn
+      ApiKeyId: !Ref BankRateApiKey
+    DependsOn: BankRateApiKey
+
+  # ---------------------------------------------------------------------------
+  # S3 Bucket for OpenAPI Spec
+  # ---------------------------------------------------------------------------
+  OpenApiBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-bank-openapi-${AWS::AccountId}'
+      VersioningConfiguration: {Status: Enabled}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+    DeletionPolicy: Delete
+
+  # ---------------------------------------------------------------------------
+  # Custom Resource — Seed Banks Table
+  # ---------------------------------------------------------------------------
+  DataSeedingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBSeedingAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:PutItem, dynamodb:BatchWriteItem]
+                Resource: !GetAtt BanksTable.Arn
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: 'arn:aws:s3:::*/*'
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+    DeletionPolicy: Delete
+
+  SeedDataFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt DataSeedingRole.Arn
+      Timeout: 300
+      MemorySize: 256
+      Code:
+        ZipFile: |
+          const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+          const { DynamoDBDocumentClient, BatchWriteCommand } = require('@aws-sdk/lib-dynamodb');
+          const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
+          const https = require('https');
+
+          const db  = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+          const s3  = new S3Client({});
+
+          async function fetchData(url) {
+            if (url.startsWith('s3://')) {
+              const [bucket, ...parts] = url.slice(5).split('/');
+              const resp = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: parts.join('/') }));
+              return JSON.parse(await resp.Body.transformToString());
+            }
+            return new Promise((resolve, reject) => {
+              https.get(url, (res) => {
+                if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                  return fetchData(res.headers.location).then(resolve).catch(reject);
+                }
+                let d = '';
+                res.on('data', c => d += c);
+                res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { reject(e); } });
+              }).on('error', reject);
+            });
+          }
+
+          exports.handler = async (event, context) => {
+            const r = {
+              Status: 'SUCCESS', Reason: context.logStreamName,
+              PhysicalResourceId: context.logStreamName,
+              StackId: event.StackId, RequestId: event.RequestId,
+              LogicalResourceId: event.LogicalResourceId, Data: {}
+            };
+            try {
+              if (event.RequestType === 'Delete') { await send(event, r); return; }
+              const { TableName, SeedDataUrl } = event.ResourceProperties;
+              if (!SeedDataUrl) throw new Error('SeedDataUrl is required');
+              const banks = await fetchData(SeedDataUrl);
+              const batchSize = 25;
+              for (let i = 0; i < banks.length; i += batchSize) {
+                await db.send(new BatchWriteCommand({
+                  RequestItems: { [TableName]: banks.slice(i, i + batchSize).map(b => ({ PutRequest: { Item: b } })) }
+                }));
+              }
+              r.Data = { Message: `Seeded ${banks.length} banks`, BankCount: banks.length };
+            } catch (e) {
+              r.Status = 'FAILED'; r.Reason = e.message;
+            }
+            await send(event, r);
+          };
+
+          async function send(event, body) {
+            const url = require('url');
+            const p = url.parse(event.ResponseURL);
+            const s = JSON.stringify(body);
+            return new Promise((res, rej) => {
+              const req = https.request({ hostname: p.hostname, port: 443, path: p.path, method: 'PUT',
+                headers: { 'content-type': '', 'content-length': s.length } }, () => res());
+              req.on('error', rej);
+              req.write(s); req.end();
+            });
+          }
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+    DeletionPolicy: Delete
+
+  BankDataSeeding:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt SeedDataFn.Arn
+      TableName: !Ref BanksTable
+      SeedDataUrl: !Ref SeedDataUrl
+    DependsOn: BanksTable
+
+# =============================================================================
+# OUTPUTS
+# =============================================================================
+Outputs:
+
+  ApiEndpoint:
+    Description: Bank Rate Collection API Gateway endpoint URL
+    Value: !Sub 'https://${BankRateApi}.execute-api.${AWS::Region}.amazonaws.com/prod'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiEndpoint'
+
+  ApiKeyValue:
+    Description: API key value for the bank rate collection API
+    Condition: CreateOwnApiKey
+    Value: !GetAtt ApiKeyValueRetrieval.ApiKeyValue
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiKeyValue'
+
+  ApiKeyId:
+    Description: API key ID (use as SharedApiKeyId input to reuse across stacks)
+    Condition: CreateOwnApiKey
+    Value: !Ref BankRateApiKey
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiKeyId'
+
+  BanksTableName:
+    Value: !Ref BanksTable
+    Export: {Name: !Sub '${AWS::StackName}-BanksTable'}
+
+  SessionsTableName:
+    Value: !Ref CallSessionsTable
+    Export: {Name: !Sub '${AWS::StackName}-SessionsTable'}
+
+  RatesTableName:
+    Value: !Ref BankRatesTable
+    Export: {Name: !Sub '${AWS::StackName}-RatesTable'}
+
+  OpenApiBucketName:
+    Value: !Ref OpenApiBucket
+    Export: {Name: !Sub '${AWS::StackName}-OpenApiBucket'}

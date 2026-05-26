@@ -1,0 +1,588 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Bank Rate Collection — AI Prompt and AI Agent setup for Amazon Q in Connect.
+  Creates the Ryan rate-collection AI Prompt and the Bank-Rate-Collection AI Agent
+  with all required tools (API tools + RETURN_TO_CONTROL tools).
+
+# =============================================================================
+# Copyright 2026 Amazon Web Services — S&P Global Ratewatch
+# SPDX-License-Identifier: MIT-0
+# =============================================================================
+
+# =============================================================================
+# PARAMETERS
+# =============================================================================
+Parameters:
+
+  AssistantId:
+    Type: String
+    Description: >-
+      ID of the Amazon Q in Connect (Wisdom) Assistant.
+      Obtained from the BankAssistantStack output AssistantId.
+    AllowedPattern: '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'
+    ConstraintDescription: Must be a valid UUID
+
+  ConnectInstanceId:
+    Type: String
+    Description: >-
+      ID of the Amazon Connect instance.
+    AllowedPattern: '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'
+    ConstraintDescription: Must be a valid UUID
+
+  AssistantAssociationId:
+    Type: String
+    Description: >-
+      ID or ARN of the Knowledge Base association with the Assistant.
+      Obtained from the BankAssistantStack output AssistantAssociationId.
+
+  BankRateCollectionPromptUrl:
+    Type: String
+    Default: ''
+    Description: >-
+      URL (HTTPS or s3://) for the bank-rate-collection-prompt.yaml file.
+      Leave empty to use the inline default prompt configuration.
+
+  AgentCoreGatewayArn:
+    Type: String
+    Description: >-
+      ARN of the AgentCore Gateway created by bank-agentcore-gateway.yaml.
+      Used to link the Bank Rate API tools to the AI Agent.
+    Default: ''
+
+  Locale:
+    Type: String
+    Default: en_US
+    AllowedValues: [en_US, en_GB]
+    Description: Locale for AI Agent responses.
+
+  Boto3LayerArn:
+    Type: String
+    Default: ''
+    Description: >-
+      ARN of a pre-existing Lambda Layer containing an updated boto3 version.
+      Required for Q Connect AI Agent API support.
+
+  Boto3LayerS3Bucket:
+    Type: String
+    Default: ''
+    Description: >-
+      S3 bucket containing the boto3-layer.zip.
+      Used only when Boto3LayerArn is not provided.
+
+  Boto3LayerS3Key:
+    Type: String
+    Default: ''
+    Description: >-
+      S3 key path to the boto3-layer.zip within the bucket.
+
+# =============================================================================
+# CONDITIONS
+# =============================================================================
+Conditions:
+  HasBoto3LayerArn: !Not [!Equals [!Ref Boto3LayerArn, '']]
+  HasBoto3LayerS3:  !And
+    - !Not [!Equals [!Ref Boto3LayerS3Bucket, '']]
+    - !Not [!Equals [!Ref Boto3LayerS3Key, '']]
+  ShouldCreateBoto3Layer: !And
+    - !Condition HasBoto3LayerS3
+    - !Equals [!Ref Boto3LayerArn, '']
+
+# =============================================================================
+# RESOURCES
+# =============================================================================
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # Optional: Create boto3 Lambda layer from S3
+  # ---------------------------------------------------------------------------
+  Boto3LambdaLayer:
+    Type: AWS::Lambda::LayerVersion
+    Condition: ShouldCreateBoto3Layer
+    Properties:
+      LayerName: !Sub '${AWS::StackName}-boto3'
+      Description: 'Updated boto3 for Q Connect AI Agents API support'
+      Content:
+        S3Bucket: !Ref Boto3LayerS3Bucket
+        S3Key:    !Ref Boto3LayerS3Key
+      CompatibleRuntimes: [python3.13, python3.12, python3.11]
+      LicenseInfo: 'Apache-2.0'
+
+  # ---------------------------------------------------------------------------
+  # CloudWatch Log Group
+  # ---------------------------------------------------------------------------
+  AIAgentsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-CR'
+      RetentionInDays: 7
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+    DeletionPolicy: Delete
+
+  # ---------------------------------------------------------------------------
+  # IAM Role for Custom Resource Lambda
+  # ---------------------------------------------------------------------------
+  AIAgentsCustomResourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: AIAgentsCustomResourcePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - wisdom:CreateAIPrompt
+                  - wisdom:CreateAIPromptVersion
+                  - wisdom:DeleteAIPrompt
+                  - wisdom:ListAIPrompts
+                  - wisdom:GetAIPrompt
+                  - wisdom:UpdateAIPrompt
+                  - qconnect:CreateAIPrompt
+                  - qconnect:CreateAIPromptVersion
+                  - qconnect:DeleteAIPrompt
+                  - qconnect:ListAIPrompts
+                  - qconnect:GetAIPrompt
+                  - qconnect:UpdateAIPrompt
+                Resource:
+                  - !Sub 'arn:aws:wisdom:${AWS::Region}:${AWS::AccountId}:assistant/${AssistantId}'
+                  - !Sub 'arn:aws:wisdom:${AWS::Region}:${AWS::AccountId}:assistant/${AssistantId}/*'
+                  - !Sub 'arn:aws:wisdom:${AWS::Region}:${AWS::AccountId}:ai-prompt/${AssistantId}/*'
+                  - !Sub 'arn:aws:qconnect:${AWS::Region}:${AWS::AccountId}:assistant/${AssistantId}'
+                  - !Sub 'arn:aws:qconnect:${AWS::Region}:${AWS::AccountId}:assistant/${AssistantId}/*'
+                  - !Sub 'arn:aws:qconnect:${AWS::Region}:${AWS::AccountId}:ai-prompt/${AssistantId}/*'
+              - Effect: Allow
+                Action:
+                  - wisdom:CreateAIAgent
+                  - wisdom:CreateAIAgentVersion
+                  - wisdom:DeleteAIAgent
+                  - wisdom:ListAIAgents
+                  - wisdom:GetAIAgent
+                  - wisdom:UpdateAIAgent
+                  - qconnect:CreateAIAgent
+                  - qconnect:CreateAIAgentVersion
+                  - qconnect:DeleteAIAgent
+                  - qconnect:ListAIAgents
+                  - qconnect:GetAIAgent
+                  - qconnect:UpdateAIAgent
+                Resource:
+                  - !Sub 'arn:aws:wisdom:${AWS::Region}:${AWS::AccountId}:assistant/${AssistantId}'
+                  - !Sub 'arn:aws:wisdom:${AWS::Region}:${AWS::AccountId}:assistant/${AssistantId}/*'
+                  - !Sub 'arn:aws:wisdom:${AWS::Region}:${AWS::AccountId}:ai-agent/${AssistantId}/*'
+                  - !Sub 'arn:aws:qconnect:${AWS::Region}:${AWS::AccountId}:assistant/${AssistantId}'
+                  - !Sub 'arn:aws:qconnect:${AWS::Region}:${AWS::AccountId}:assistant/${AssistantId}/*'
+                  - !Sub 'arn:aws:qconnect:${AWS::Region}:${AWS::AccountId}:ai-agent/${AssistantId}/*'
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+    DeletionPolicy: Delete
+
+  # ---------------------------------------------------------------------------
+  # Custom Resource Lambda — creates AI Prompt and AI Agent via boto3
+  # ---------------------------------------------------------------------------
+  AIAgentsCustomResourceFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.13
+      Handler: index.handler
+      Role: !GetAtt AIAgentsCustomResourceRole.Arn
+      Timeout: 900
+      MemorySize: 512
+      LoggingConfig:
+        LogGroup: !Ref AIAgentsLogGroup
+        LogFormat: JSON
+      Layers:
+        - !If
+          - HasBoto3LayerArn
+          - !Ref Boto3LayerArn
+          - !If
+            - ShouldCreateBoto3Layer
+            - !Ref Boto3LambdaLayer
+            - !Ref 'AWS::NoValue'
+      Code:
+        ZipFile: |
+          import json, logging, os, time, urllib.request, urllib.error
+          import boto3
+          from botocore.exceptions import ClientError
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def handler(event, context):
+              logger.info(f"Event: {json.dumps(event, default=str)}")
+              props = event.get('ResourceProperties', {})
+              rt    = event.get('RequestType')
+              phys  = event.get('PhysicalResourceId', 'NONE')
+              try:
+                  if rt == 'Delete':
+                      cleanup(props, phys)
+                      send(event, context, 'SUCCESS', {}, phys)
+                      return
+                  result = create_or_update(props, phys if rt == 'Update' else None)
+                  send(event, context, 'SUCCESS', result, result.get('PhysicalId', phys))
+              except Exception as e:
+                  logger.error(f"Error: {e}", exc_info=True)
+                  send(event, context, 'FAILED', {}, phys, str(e))
+
+          def fetch_prompt(url, s3_bucket):
+              """Fetch prompt YAML from HTTPS URL or S3 key."""
+              if not url:
+                  return None
+              if url.startswith('s3://'):
+                  s3 = boto3.client('s3')
+                  parts = url[5:].split('/', 1)
+                  resp = s3.get_object(Bucket=parts[0], Key=parts[1])
+                  return resp['Body'].read().decode('utf-8')
+              if url.startswith('https://') or url.startswith('http://'):
+                  with urllib.request.urlopen(url, timeout=30) as r:
+                      return r.read().decode('utf-8')
+              if s3_bucket:
+                  s3 = boto3.client('s3')
+                  resp = s3.get_object(Bucket=s3_bucket, Key=url)
+                  return resp['Body'].read().decode('utf-8')
+              return None
+
+          def create_or_update(props, old_phys):
+              region         = os.environ.get('AWS_REGION', 'us-east-1')
+              assistant_id   = props['AssistantId']
+              assoc_id       = props['AssistantAssociationId']
+              connect_id     = props['ConnectInstanceId']
+              prompt_url     = props.get('PromptUrl', '')
+              s3_bucket      = props.get('AssetsBucketName', '')
+              gateway_arn    = props.get('AgentCoreGatewayArn', '')
+              locale         = props.get('Locale', 'en_US')
+
+              client = boto3.client('qconnect', region_name=region)
+
+              # ── 1. Build prompt content ──────────────────────────────────
+              prompt_text = fetch_prompt(prompt_url, s3_bucket)
+              if not prompt_text:
+                  # Minimal inline fallback
+                  prompt_text = (
+                      "system: |\n"
+                      "  You are Ryan, an AI assistant from S&P Global Ratewatch. "
+                      "  Collect deposit rates from banks professionally.\n"
+                      "messages:\n"
+                      "  - '{{$.conversationHistory}}'\n"
+                      "  - role: assistant\n"
+                      "    content: <message>\n"
+                  )
+
+              # ── 2. Create AI Prompt ──────────────────────────────────────
+              prompt_name = 'Bank-Rate-Collection-Prompt'
+              prompt_id   = find_existing(client, assistant_id, 'prompts', prompt_name)
+
+              if prompt_id:
+                  logger.info(f"Prompt {prompt_name} already exists: {prompt_id}")
+              else:
+                  resp = client.create_ai_prompt(
+                      assistantId=assistant_id,
+                      name=prompt_name,
+                      description='Ryan rate-collection agent prompt for S&P Global Ratewatch',
+                      type='ORCHESTRATION',
+                      apiFormat='MESSAGES',
+                      modelId='global.anthropic.claude-haiku-4-5-20251001-v1:0',
+                      templateConfiguration={
+                          'textFullAIPromptEditTemplateConfiguration': {
+                              'text': prompt_text
+                          }
+                      },
+                      templateType='TEXT',
+                      tags={'Environment': 'NonProd', 'Name': 'BankRateCollection'}
+                  )
+                  prompt_id = resp['aiPrompt']['aiPromptId']
+                  logger.info(f"Created prompt {prompt_id}")
+
+              # Create a version
+              ver_resp = client.create_ai_prompt_version(
+                  assistantId=assistant_id,
+                  aiPromptId=prompt_id
+              )
+              prompt_version_id = f"{prompt_id}:{ver_resp['aiPromptVersion']['versionNumber']}"
+              logger.info(f"Prompt version: {prompt_version_id}")
+
+              # ── 3. Build tool list ───────────────────────────────────────
+              # Retrieve (MCP — Knowledge Base search)
+              retrieve_tool = {
+                  'toolName': 'Retrieve',
+                  'toolType': 'MODEL_CONTEXT_PROTOCOL',
+                  'toolId': 'aws_service__qconnect_Retrieve',
+                  'instruction': {'instruction': 'Search the knowledge base for bank rate collection information.'},
+                  'overrideInputValues': [
+                      {
+                          'jsonPath': '$.retrievalConfiguration.knowledgeSource.assistantAssociationIds',
+                          'value': {'constant': {'type': 'JSON_STRING', 'value': f'["{assoc_id}"]'}}
+                      },
+                      {
+                          'jsonPath': '$.assistantId',
+                          'value': {'constant': {'type': 'STRING', 'value': f'{{{{$.assistantId}}}}'}}
+                      }
+                  ],
+                  'userInteractionConfiguration': {'isUserConfirmationRequired': False}
+              }
+
+              # Escalate (RETURN_TO_CONTROL)
+              escalate_tool = {
+                  'toolName': 'Escalate',
+                  'toolType': 'RETURN_TO_CONTROL',
+                  'description': 'Transfer to human agent when banker issue cannot be resolved by AI',
+                  'instruction': {'instruction': 'Escalate when you cannot adequately assist the banker.'},
+                  'inputSchema': {
+                      'type': 'object',
+                      'properties': {
+                          'reason': {'type': 'string', 'description': 'Reason for escalation'}
+                      },
+                      'required': ['reason']
+                  },
+                  'userInteractionConfiguration': {'isUserConfirmationRequired': False}
+              }
+
+              # Complete (RETURN_TO_CONTROL)
+              complete_tool = {
+                  'toolName': 'Complete',
+                  'toolType': 'RETURN_TO_CONTROL',
+                  'description': 'End the call after all rate collection steps are done and banker has said goodbye',
+                  'instruction': {'instruction': 'Mark call complete ONLY after banker goodbye and closeCallSession has been called.'},
+                  'inputSchema': {
+                      'type': 'object',
+                      'properties': {
+                          'completion_type': {
+                              'type': 'string',
+                              'enum': ['full', 'spot_check', 'incomplete', 'voicemail', 'email'],
+                              'description': 'How the call completed'
+                          },
+                          'banker_name': {
+                              'type': 'string',
+                              'description': 'Name of the banker collected at Step 12'
+                          }
+                      },
+                      'required': ['completion_type']
+                  },
+                  'userInteractionConfiguration': {'isUserConfirmationRequired': False}
+              }
+
+              # Bank Rate API tools via AgentCore Gateway
+              bank_api_tools = []
+              if gateway_arn:
+                  api_ops = [
+                      'startCallSession',
+                      'getCallSession',
+                      'closeCallSession',
+                      'submitCDRates',
+                      'submitMoneyMarketRates',
+                      'submitIRARates',
+                      'submitSavingsRates',
+                      'submitCheckingRates',
+                      'submitSpecial',
+                      'scheduleCallback',
+                      'markDNC',
+                      'recordMergerAcquisition',
+                  ]
+                  for op in api_ops:
+                      bank_api_tools.append({
+                          'toolName': f'BankRate_API___{op}',
+                          'toolType': 'MODEL_CONTEXT_PROTOCOL',
+                          'toolId': f'{gateway_arn}',
+                          'instruction': {'instruction': f'Call the Bank Rate Collection API operation: {op}'},
+                          'userInteractionConfiguration': {'isUserConfirmationRequired': False}
+                      })
+
+              all_tools = [retrieve_tool] + bank_api_tools + [escalate_tool, complete_tool]
+
+              # ── 4. Create AI Agent ───────────────────────────────────────
+              agent_name = 'Bank-Rate-Collection-Agent'
+              agent_id   = find_existing(client, assistant_id, 'agents', agent_name)
+
+              agent_config = {
+                  'orchestrationAIAgentConfiguration': {
+                      'associationConfigurations': [
+                          {
+                              'associationId': assoc_id,
+                              'associationType': 'KNOWLEDGE_BASE',
+                              'associationConfigurationData': {
+                                  'knowledgeBaseAssociationConfigurationData': {
+                                      'contentTagFilter': None,
+                                      'maxResults': 5,
+                                      'overrideKnowledgeBaseSearchType': 'SEMANTIC'
+                                  }
+                              }
+                          }
+                      ],
+                      'aiAgentInputSchema': None,
+                      'locale': locale,
+                      'orchestrationPromptTemplate': {
+                          'aiPromptId': prompt_version_id
+                      },
+                      'toolConfiguration': {
+                          'tools': [
+                              {'toolSpec': t} for t in all_tools
+                          ]
+                      }
+                  }
+              }
+
+              if agent_id:
+                  logger.info(f"Updating agent {agent_id}")
+                  resp = client.update_ai_agent(
+                      assistantId=assistant_id,
+                      aiAgentId=agent_id,
+                      configuration=agent_config
+                  )
+                  agent_id = resp['aiAgent']['aiAgentId']
+              else:
+                  resp = client.create_ai_agent(
+                      assistantId=assistant_id,
+                      name=agent_name,
+                      description='Ryan AI rate-collection agent for S&P Global Ratewatch outbound calls',
+                      type='ORCHESTRATION',
+                      configuration=agent_config,
+                      tags={'Environment': 'NonProd', 'Name': 'BankRateCollection'}
+                  )
+                  agent_id = resp['aiAgent']['aiAgentId']
+                  logger.info(f"Created agent {agent_id}")
+
+              # Create agent version
+              ver_resp = client.create_ai_agent_version(
+                  assistantId=assistant_id,
+                  aiAgentId=agent_id
+              )
+              agent_version = ver_resp['aiAgentVersion']['versionNumber']
+              agent_arn     = resp['aiAgent'].get('aiAgentArn', '')
+              logger.info(f"Agent version {agent_version} created")
+
+              phys_id = f"{assistant_id}/{agent_id}"
+              return {
+                  'PhysicalId':      phys_id,
+                  'AgentId':         agent_id,
+                  'AgentArn':        agent_arn,
+                  'AgentVersion':    str(agent_version),
+                  'PromptId':        prompt_id,
+                  'PromptVersionId': prompt_version_id,
+              }
+
+          def find_existing(client, assistant_id, resource_type, name):
+              """Return ID of existing prompt/agent by name, or None."""
+              try:
+                  if resource_type == 'prompts':
+                      paginator = client.get_paginator('list_ai_prompts')
+                      for page in paginator.paginate(assistantId=assistant_id):
+                          for item in page.get('aiPromptSummaries', []):
+                              if item.get('name') == name:
+                                  return item['aiPromptId']
+                  elif resource_type == 'agents':
+                      paginator = client.get_paginator('list_ai_agents')
+                      for page in paginator.paginate(assistantId=assistant_id):
+                          for item in page.get('aiAgentSummaries', []):
+                              if item.get('name') == name:
+                                  return item['aiAgentId']
+              except Exception as e:
+                  logger.warning(f"Error listing {resource_type}: {e}")
+              return None
+
+          def cleanup(props, phys):
+              region = os.environ.get('AWS_REGION', 'us-east-1')
+              assistant_id = props.get('AssistantId', '')
+              if not assistant_id or phys == 'NONE':
+                  return
+              client = boto3.client('qconnect', region_name=region)
+              try:
+                  parts = phys.split('/')
+                  if len(parts) == 2:
+                      agent_id = parts[1]
+                      client.delete_ai_agent(assistantId=assistant_id, aiAgentId=agent_id)
+                      logger.info(f"Deleted agent {agent_id}")
+              except Exception as e:
+                  logger.warning(f"Cleanup error: {e}")
+
+          def send(event, context, status, data, phys_id=None, reason=None):
+              body = {
+                  'Status': status,
+                  'Reason': reason or f"See CloudWatch: {context.log_stream_name}",
+                  'PhysicalResourceId': phys_id or context.log_stream_name,
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Data': data
+              }
+              data_json = json.dumps(body).encode('utf-8')
+              req = urllib.request.Request(
+                  event['ResponseURL'],
+                  data=data_json,
+                  headers={'Content-Type': '', 'Content-Length': len(data_json)},
+                  method='PUT'
+              )
+              try:
+                  urllib.request.urlopen(req, timeout=30)
+              except Exception as e:
+                  logger.error(f"Failed to send CFN response: {e}")
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+    DeletionPolicy: Delete
+
+  # ---------------------------------------------------------------------------
+  # Custom Resource Invocation — creates the Prompt + Agent
+  # ---------------------------------------------------------------------------
+  BankRateAIAgents:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:           !GetAtt AIAgentsCustomResourceFn.Arn
+      AssistantId:            !Ref AssistantId
+      ConnectInstanceId:      !Ref ConnectInstanceId
+      AssistantAssociationId: !Ref AssistantAssociationId
+      PromptUrl:              !Ref BankRateCollectionPromptUrl
+      AgentCoreGatewayArn:    !Ref AgentCoreGatewayArn
+      Locale:                 !Ref Locale
+
+# =============================================================================
+# OUTPUTS
+# =============================================================================
+Outputs:
+
+  AgentId:
+    Description: ID of the Bank-Rate-Collection AI Agent in Q in Connect
+    Value: !GetAtt BankRateAIAgents.AgentId
+    Export:
+      Name: !Sub '${AWS::StackName}-AgentId'
+
+  AgentArn:
+    Description: ARN of the Bank-Rate-Collection AI Agent
+    Value: !GetAtt BankRateAIAgents.AgentArn
+    Export:
+      Name: !Sub '${AWS::StackName}-AgentArn'
+
+  PromptId:
+    Description: ID of the Bank-Rate-Collection AI Prompt
+    Value: !GetAtt BankRateAIAgents.PromptId
+    Export:
+      Name: !Sub '${AWS::StackName}-PromptId'
+
+  PromptVersionId:
+    Description: Versioned ID of the AI Prompt (id:version)
+    Value: !GetAtt BankRateAIAgents.PromptVersionId
+    Export:
+      Name: !Sub '${AWS::StackName}-PromptVersionId'

@@ -1,0 +1,266 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Bank Rate Collection — Amazon Q in Connect Assistant setup.
+  Creates the Wisdom/Q Connect Assistant, Knowledge Base S3 bucket,
+  Knowledge Base, and links the Assistant to the Amazon Connect instance.
+  Mirrors the hotel assistant-setup.yaml pattern.
+
+# =============================================================================
+# PARAMETERS
+# =============================================================================
+Parameters:
+
+  ConnectInstanceArn:
+    Type: String
+    Description: ARN of the Amazon Connect instance
+    AllowedPattern: '^arn:aws:connect:[a-z0-9-]+:[0-9]{12}:instance/[a-zA-Z0-9-]+'
+    ConstraintDescription: Must be a valid Amazon Connect Instance ARN
+
+# =============================================================================
+# RESOURCES
+# =============================================================================
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # KMS Key for encryption
+  # ---------------------------------------------------------------------------
+  ConnectAssistantKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: 'KMS key for Bank Rate Collection Q Connect Assistant encryption'
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+      KeySpec: SYMMETRIC_DEFAULT
+      KeyUsage: ENCRYPT_DECRYPT
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+
+  # ---------------------------------------------------------------------------
+  # Q Connect (Wisdom) Assistant
+  # ---------------------------------------------------------------------------
+  ConnectAssistant:
+    Type: AWS::Wisdom::Assistant
+    Properties:
+      Name: !Sub 'bank-rate-assistant-${AWS::StackName}'
+      Description: 'Q in Connect Assistant for S&P Global Ratewatch bank rate collection'
+      Type: AGENT
+      Tags:
+        - {Key: AmazonConnectEnabled, Value: 'true'}
+        - {Key: Environment,          Value: NonProd}
+        - {Key: Name,                 Value: BankRateCollection}
+
+  # ---------------------------------------------------------------------------
+  # S3 Bucket for Knowledge Base documents
+  # ---------------------------------------------------------------------------
+  KnowledgeBaseBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-bank-kb-${AWS::AccountId}'
+      VersioningConfiguration: {Status: Enabled}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt ConnectAssistantKey.Arn
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+    DeletionPolicy: Delete
+
+  # ---------------------------------------------------------------------------
+  # Knowledge Base
+  # ---------------------------------------------------------------------------
+  BankKnowledgeBase:
+    Type: AWS::Wisdom::KnowledgeBase
+    Properties:
+      Name: !Sub 'bank-rate-kb-${AWS::StackName}'
+      Description: 'Knowledge base for S&P Global Ratewatch bank rate collection FAQs'
+      KnowledgeBaseType: EXTERNAL
+      SourceConfiguration:
+        AppIntegrations:
+          AppIntegrationArn: !Sub 'arn:aws:app-integrations:${AWS::Region}:${AWS::AccountId}:application-source-config/S3'
+          ObjectFields:
+            - 'title'
+            - 'content'
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+
+  # ---------------------------------------------------------------------------
+  # Assistant Association (links KB to Assistant)
+  # ---------------------------------------------------------------------------
+  AssistantAssociation:
+    Type: AWS::Wisdom::AssistantAssociation
+    Properties:
+      AssistantId: !GetAtt ConnectAssistant.AssistantId
+      AssociationType: KNOWLEDGE_BASE
+      Association:
+        KnowledgeBaseId: !GetAtt BankKnowledgeBase.KnowledgeBaseId
+
+  # ---------------------------------------------------------------------------
+  # Lambda Role for Connect Integration
+  # ---------------------------------------------------------------------------
+  ConnectIntegrationLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-ConnectIntegration'
+      RetentionInDays: 7
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+    DeletionPolicy: Delete
+
+  ConnectIntegrationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ConnectIntegrationAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - connect:CreateIntegrationAssociation
+                  - connect:DeleteIntegrationAssociation
+                  - connect:ListIntegrationAssociations
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - wisdom:GetAssistant
+                  - wisdom:TagResource
+                Resource: !GetAtt ConnectAssistant.AssistantArn
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+    DeletionPolicy: Delete
+
+  # ---------------------------------------------------------------------------
+  # Lambda — Connect Integration (links Wisdom Assistant to Connect)
+  # ---------------------------------------------------------------------------
+  IntegrationFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.13
+      Handler: index.handler
+      Role: !GetAtt ConnectIntegrationRole.Arn
+      Timeout: 60
+      LoggingConfig:
+        LogGroup: !Ref ConnectIntegrationLogGroup
+        LogFormat: JSON
+      Code:
+        ZipFile: |
+          import json, boto3, cfnresponse
+
+          connect = boto3.client('connect')
+
+          def handler(event, context):
+              try:
+                  if event['RequestType'] == 'Delete':
+                      assoc_id = event.get('PhysicalResourceId')
+                      instance_id = event['ResourceProperties']['InstanceId']
+                      if assoc_id and assoc_id != 'NONE':
+                          try:
+                              connect.delete_integration_association(
+                                  InstanceId=instance_id,
+                                  IntegrationAssociationId=assoc_id
+                              )
+                          except Exception as e:
+                              print(f"Delete error (may be ok): {e}")
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+
+                  instance_id   = event['ResourceProperties']['InstanceId']
+                  assistant_arn = event['ResourceProperties']['AssistantArn']
+
+                  resp = connect.create_integration_association(
+                      InstanceId=instance_id,
+                      IntegrationType='WISDOM_ASSISTANT',
+                      IntegrationArn=assistant_arn
+                  )
+                  assoc_id = resp['IntegrationAssociationId']
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                                   {'AssociationId': assoc_id}, assoc_id)
+              except Exception as e:
+                  print(f"Error: {e}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+    DeletionPolicy: Delete
+
+  # Associate Assistant with Connect
+  ConnectIntegration:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt IntegrationFn.Arn
+      InstanceId:   !Select [1, !Split ['instance/', !Ref ConnectInstanceArn]]
+      AssistantArn: !GetAtt ConnectAssistant.AssistantArn
+
+# =============================================================================
+# OUTPUTS
+# =============================================================================
+Outputs:
+
+  AssistantId:
+    Description: Q in Connect Assistant ID
+    Value: !GetAtt ConnectAssistant.AssistantId
+    Export:
+      Name: !Sub '${AWS::StackName}-AssistantId'
+
+  AssistantArn:
+    Description: Q in Connect Assistant ARN
+    Value: !GetAtt ConnectAssistant.AssistantArn
+    Export:
+      Name: !Sub '${AWS::StackName}-AssistantArn'
+
+  AssistantAssociationId:
+    Description: Knowledge Base Association ID
+    Value: !GetAtt AssistantAssociation.AssistantAssociationId
+    Export:
+      Name: !Sub '${AWS::StackName}-AssistantAssociationId'
+
+  KnowledgeBaseId:
+    Description: Knowledge Base ID
+    Value: !GetAtt BankKnowledgeBase.KnowledgeBaseId
+    Export:
+      Name: !Sub '${AWS::StackName}-KnowledgeBaseId'
+
+  KnowledgeBaseBucketName:
+    Description: S3 bucket for knowledge base documents
+    Value: !Ref KnowledgeBaseBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-KBBucket'

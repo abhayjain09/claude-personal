@@ -1,0 +1,104 @@
+FIXES APPLIED - Session Log
+Generated: 2026-05-11T14:13:17.120472
+
+== May 8, 2026 ==
+
+FIX 1 - Lex FallbackIntent: Added initialResponse filler
+  Intent: FALLBCKINT
+  Added: initialResponse message = "Got it! Let me look into that for you."
+  Status: ✅ Applied and built
+  Effect: Fires when FallbackIntent is matched (not AmazonQinConnect)
+
+FIX 2 - Lex AmazonQinConnect: Updated fulfillmentUpdates startResponse
+  Intent: 1SCC6HWXUT
+  Changed: startResponse delayInSeconds 2 → 1, message = "Sure, one moment please."
+  Status: ✅ Applied and built
+  Effect: BLOCKED - fulfillmentCodeHook.enabled=False prevents this from firing
+           for QInConnect intents. Architecturally impossible to fix.
+
+FIX 3 - Contact Flow: Removed duplicate CreateWisdomSession
+  Flow: Self Service Test Flow (758b182f-afad-4321-acbe-9d8a178c9ae2)
+  Removed: Second CreateWisdomSession block (658ef1c7) + its UpdateContactData (5cb80952)
+  Wired: SetVoice (4a23dff9) → directly to Lex bot (aa0f8fba)
+  Status: ✅ Applied
+  Effect: Removed ~1.3s of unnecessary setup time before Lex bot starts
+
+FIX 4 - Contact Flow: SetVoice engine Neural → Generative
+  Changed: TextToSpeechEngine = "Generative", TextToSpeechStyle = "None"
+  Status: ✅ Applied
+  Effect: Aligns with Nova Sonic streaming path
+
+FIX 5 - AI Prompt: Added pre-tool acknowledgment for Nova Sonic streaming
+  Prompt: Hotel-Self-Service-Prompt → version 3
+  Added: CRITICAL FOR VOICE section with MANDATORY PRE-TOOL ACKNOWLEDGMENT
+  Added: voice_formatting_rules (no markdown/asterisks/bullets)
+  Status: ✅ Applied - prompt updated to v3, AI Agent updated to use v3
+  Effect: AI Agent should now say "Let me look that up!" before tool calls,
+           which Nova Sonic streams immediately while tool executes
+
+== May 13, 2026 ==
+
+FIX 9 - Prompt restructured per AWS Connect prompt engineering best practices
+  Source: https://docs.aws.amazon.com/connect/latest/adminguide/agentic-self-service-prompt-best-practices.html
+  Live prompt: Hotel-Self-Service-Prompt updated and published as version 7
+  Live agent: Hotel-Self-Service-Agent now points to prompt version 7 (agent version 5)
+  Changes applied:
+    - Restructured into ## IDENTITY / RESPONSE BEHAVIOR / RESPONSE FORMAT / LATENCY /
+      AGENT EXPECTATIONS / STANDARD PROCEDURES / RESTRICTIONS / ESCALATION BOUNDARIES sections
+    - Added explicit SUCCESS CRITERIA and FAILURE CONDITIONS (observable, specific)
+    - Two-<message> latency pattern: immediate ack → <thinking> → tool call → result
+    - Added consecutive tool call limit check-in (after 3+ calls, pause and verify with guest)
+    - Stronger conditional if/when/then logic for multi-tool planning
+    - NEVER/ALWAYS/OUT OF SCOPE restrictions block with alternatives for each rule
+    - Removed redundant phrasing; each instruction stated once clearly
+    - Static content ordered first for prompt caching effectiveness
+    - Worked examples updated to match all new patterns
+  Status: ✅ Deployed via deploy-hotel-latency-fix.sh
+
+== PENDING / KNOWN LIMITATIONS ==
+
+  ISSUE: 4-5s silence after customer speaks
+  CAUSE: LLM (Claude Haiku) + tool call processing time
+  The minimum realistic latency for this architecture is 1.2-3.5s
+  
+  Nova Sonic speech-to-speech enabled: ✅
+    Model: amazon.nova-2-sonic-v1:0
+    This enables streaming TTS - once AI starts generating tokens, audio
+    starts playing immediately. But the initial LLM processing gap remains.
+
+  If pre-tool acknowledgment from prompt v3 is working, customer hears:
+    "Let me look that up for you!" (~1s after speaking) ← streamed by Nova Sonic
+    [tool call executes silently - ~1-2s]
+    Full answer streams in real-time
+
+  If still 4-5s silence: Claude Haiku is not following the pre-tool instruction.
+  Next step: Try claude-3-haiku-20240307 or increase instruction emphasis.
+
+== May 11, 2026 ==
+
+FIX 6 - Hotel self-service prompt hardened and deployed
+  Prompt source: hotel-assets/ai-agents/hotel/hotel-self-service-prompt.yaml
+  Live prompt: Hotel-Self-Service-Prompt updated and published as version 4
+  Live agent: Hotel-Self-Service-Agent now points to prompt version 4
+  Change: first spoken acknowledgment is now explicitly required before any tool-backed step or thinking block
+  Status: ✅ Deployed via AWS CLI
+  Effect: reduces perceived silence by forcing an immediate streamed acknowledgment before lookup or action work
+
+FIX 7 - Orchestration model switch attempted and rejected by service
+  Attempted model: anthropic.claude-3-5-haiku-20241022-v1:0
+  Result: ValidationException - not supported yet for ORCHESTRATION prompt type in Q Connect
+  Status: ✅ Verified limitation
+  Effect: live deployment kept the supported model global.anthropic.claude-haiku-4-5-20251001-v1:0 and applied the latency fix through prompt behavior instead
+
+FIX 8 - Lex AmazonQinConnect initialResponseSetting attempted, rejected, and reverted
+  Intent: 1SCC6HWXUT
+  Attempted change: add initialResponseSetting so Lex would speak before Q in Connect orchestration
+  Result: Lex locale build failed with "Q In Connect intent 'AmazonQinConnect' contains initial response configurations. Initial response configurations are not allowed in Q In Connect intent."
+  Status: ✅ Verified and reverted via AWS CLI; locale restored to Built and initialResponseSetting cleared back to null
+  Effect: confirms there is no supported Lex-side per-turn filler layer for AmazonQinConnect
+
+FIX 9 - Connect flow playback path inspected
+  Flow: Self Service Test Flow (758b182f-afad-4321-acbe-9d8a178c9ae2)
+  Finding: ConnectParticipantWithLexBot only provides the session-start greeting Text and returns control to the flow after the Lex/Q in Connect session, not between every user utterance and tool turn
+  Status: ✅ Verified from exported/live flow structure
+  Effect: Connect flow cannot inject a guaranteed per-turn acknowledgment ahead of orchestration in the current architecture

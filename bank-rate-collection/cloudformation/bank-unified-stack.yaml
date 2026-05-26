@@ -1,0 +1,241 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Bank Rate Collection — Unified Parent Stack.
+  Deploys all nested stacks in the correct dependency order:
+    1. BankAssistantStack    (Q Connect Assistant + Knowledge Base)
+    2. BankRateApiStack      (API Gateway + Lambda + DynamoDB)
+    3. BankGatewayStack      (AgentCore Gateway + Target)
+    4. BankAIAgentsStack     (AI Prompt + AI Agent)
+  
+  Prerequisites (create manually before deploying this stack):
+    - Amazon Connect instance must exist
+    - A Lex bot (Nova Sonic) must be configured on the Connect instance
+    - boto3 Lambda layer ZIP must be uploaded to S3 (or provide Boto3LayerArn)
+    - bank-rate-collection-prompt.yaml uploaded to S3 (or provide URL)
+    - bank-rate-api-openapi.yaml uploaded to S3
+
+# =============================================================================
+# PARAMETERS
+# =============================================================================
+Parameters:
+
+  # ── Connect ──────────────────────────────────────────────────────────────
+  ConnectInstanceArn:
+    Type: String
+    Description: >-
+      Full ARN of the Amazon Connect instance.
+      Format: arn:aws:connect:REGION:ACCOUNT:instance/INSTANCE-ID
+    AllowedPattern: '^arn:aws:connect:[a-z0-9-]+:[0-9]{12}:instance/[a-zA-Z0-9-]+'
+
+  ConnectInstanceId:
+    Type: String
+    Description: >-
+      ID of the Amazon Connect instance (UUID portion of the ARN).
+    AllowedPattern: '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'
+
+  # ── API ───────────────────────────────────────────────────────────────────
+  SeedDataUrl:
+    Type: String
+    Description: >-
+      URL (HTTPS or s3://) for bank-seed-data.json.
+      Used to pre-populate the BanksTable with sample bank records.
+    Default: ''
+
+  OpenApiSpecUrl:
+    Type: String
+    Description: >-
+      URL (HTTPS or s3://) for bank-rate-api-openapi.yaml.
+      Used by the AgentCore Gateway Target for tool definitions.
+    Default: ''
+
+  # ── AgentCore Gateway ─────────────────────────────────────────────────────
+  AgentCoreGatewayDiscoveryUrl:
+    Type: String
+    Description: >-
+      Connect instance OIDC discovery URL.
+      Format: https://{instance-alias}.my.connect.aws/.well-known/openid-configuration
+    AllowedPattern: '^https://[a-zA-Z0-9-]+\.my\.connect\.aws/\.well-known/openid-configuration$'
+
+  # ── AI Agent ──────────────────────────────────────────────────────────────
+  BankRateCollectionPromptUrl:
+    Type: String
+    Description: >-
+      URL (HTTPS or s3://) for bank-rate-collection-prompt.yaml.
+      If empty, a minimal inline prompt is used.
+    Default: ''
+
+  Locale:
+    Type: String
+    Default: en_US
+    AllowedValues: [en_US, en_GB]
+    Description: Locale for AI Agent responses
+
+  # ── boto3 Layer ───────────────────────────────────────────────────────────
+  Boto3LayerArn:
+    Type: String
+    Default: ''
+    Description: >-
+      ARN of a pre-existing Lambda Layer with updated boto3.
+      Required for Q Connect AI Agent API support.
+      If empty, provide Boto3LayerS3Bucket + Boto3LayerS3Key.
+
+  Boto3LayerS3Bucket:
+    Type: String
+    Default: ''
+    Description: S3 bucket containing boto3-layer.zip
+
+  Boto3LayerS3Key:
+    Type: String
+    Default: ''
+    Description: S3 key path to boto3-layer.zip
+
+  # ── S3 Assets Bucket ─────────────────────────────────────────────────────
+  AssetsBucketName:
+    Type: String
+    Default: ''
+    Description: >-
+      S3 bucket name for all uploaded assets (prompt, OpenAPI spec, seed data).
+      Used when URL parameters are S3 keys rather than full HTTPS/s3:// URLs.
+
+# =============================================================================
+# RESOURCES
+# =============================================================================
+Resources:
+
+  # ── 1. Q Connect Assistant ─────────────────────────────────────────────
+  BankAssistantStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub
+        - 'https://s3.${AWS::Region}.amazonaws.com/${Bucket}/cloudformation/bank-assistant-setup.yaml'
+        - Bucket: !Ref AssetsBucketName
+      Parameters:
+        ConnectInstanceArn: !Ref ConnectInstanceArn
+      TimeoutInMinutes: 30
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+
+  # ── 2. Bank Rate API (Lambda + DynamoDB + API Gateway) ─────────────────
+  BankRateApiStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub
+        - 'https://s3.${AWS::Region}.amazonaws.com/${Bucket}/cloudformation/bank-rate-api.yaml'
+        - Bucket: !Ref AssetsBucketName
+      Parameters:
+        SeedDataUrl:  !Ref SeedDataUrl
+        OpenApiSpecUrl: !Ref OpenApiSpecUrl
+      TimeoutInMinutes: 30
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+
+  # ── 3. AgentCore Gateway ────────────────────────────────────────────────
+  BankGatewayStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: [BankRateApiStack]
+    Properties:
+      TemplateURL: !Sub
+        - 'https://s3.${AWS::Region}.amazonaws.com/${Bucket}/cloudformation/bank-agentcore-gateway.yaml'
+        - Bucket: !Ref AssetsBucketName
+      Parameters:
+        BankRateApiEndpoint:          !GetAtt BankRateApiStack.Outputs.ApiEndpoint
+        BankRateApiKeyValue:          !GetAtt BankRateApiStack.Outputs.ApiKeyValue
+        AgentCoreGatewayDiscoveryUrl: !Ref AgentCoreGatewayDiscoveryUrl
+        OpenApiSpecS3Uri:             !Ref OpenApiSpecUrl
+        Boto3LayerArn:                !Ref Boto3LayerArn
+      TimeoutInMinutes: 60
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+
+  # ── 4. AI Prompt + AI Agent ─────────────────────────────────────────────
+  BankAIAgentsStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: [BankAssistantStack, BankGatewayStack]
+    Properties:
+      TemplateURL: !Sub
+        - 'https://s3.${AWS::Region}.amazonaws.com/${Bucket}/cloudformation/bank-ai-agents-setup.yaml'
+        - Bucket: !Ref AssetsBucketName
+      Parameters:
+        AssistantId:                  !GetAtt BankAssistantStack.Outputs.AssistantId
+        ConnectInstanceId:            !Ref ConnectInstanceId
+        AssistantAssociationId:       !GetAtt BankAssistantStack.Outputs.AssistantAssociationId
+        BankRateCollectionPromptUrl:  !Ref BankRateCollectionPromptUrl
+        AgentCoreGatewayArn:          !GetAtt BankGatewayStack.Outputs.GatewayArn
+        Locale:                       !Ref Locale
+        Boto3LayerArn:                !Ref Boto3LayerArn
+        Boto3LayerS3Bucket:           !Ref Boto3LayerS3Bucket
+        Boto3LayerS3Key:              !Ref Boto3LayerS3Key
+      TimeoutInMinutes: 60
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+
+# =============================================================================
+# OUTPUTS
+# =============================================================================
+Outputs:
+
+  # ── Connect & Agent ──────────────────────────────────────────────────────
+  AssistantId:
+    Description: Q in Connect Assistant ID — use in Connect Contact Flow
+    Value: !GetAtt BankAssistantStack.Outputs.AssistantId
+
+  AIAgentId:
+    Description: AI Agent ID — reference in Lex bot session attributes
+    Value: !GetAtt BankAIAgentsStack.Outputs.AgentId
+
+  AIAgentArn:
+    Description: >-
+      AI Agent ARN — use in Connect contact flow Lex session attribute
+      x-amz-lex:q-in-connect:ai-agent-arn
+    Value: !GetAtt BankAIAgentsStack.Outputs.AgentArn
+
+  # ── API ──────────────────────────────────────────────────────────────────
+  ApiEndpoint:
+    Description: Bank Rate Collection REST API endpoint
+    Value: !GetAtt BankRateApiStack.Outputs.ApiEndpoint
+
+  ApiKeyValue:
+    Description: API key value (keep secret — used only by AgentCore Gateway)
+    Value: !GetAtt BankRateApiStack.Outputs.ApiKeyValue
+
+  # ── Gateway ──────────────────────────────────────────────────────────────
+  GatewayArn:
+    Description: AgentCore Gateway ARN
+    Value: !GetAtt BankGatewayStack.Outputs.GatewayArn
+
+  GatewayUrl:
+    Description: AgentCore Gateway endpoint URL
+    Value: !GetAtt BankGatewayStack.Outputs.GatewayUrl
+
+  # ── Data ─────────────────────────────────────────────────────────────────
+  BanksTableName:
+    Description: DynamoDB table for bank reference data
+    Value: !GetAtt BankRateApiStack.Outputs.BanksTableName
+
+  RatesTableName:
+    Description: DynamoDB table for collected rate data
+    Value: !GetAtt BankRateApiStack.Outputs.RatesTableName
+
+  KnowledgeBaseBucketName:
+    Description: S3 bucket for knowledge base documents — upload FAQ/policy files here
+    Value: !GetAtt BankAssistantStack.Outputs.KnowledgeBaseBucketName

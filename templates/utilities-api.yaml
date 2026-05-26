@@ -1,0 +1,1852 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Utilities Customer Service API - Demonstrates AI agent capabilities for energy/water utility services including accounts, bills, usage, outages, and service requests'
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: 'Data Configuration'
+      Parameters:
+      - SeedDataUrl
+      - OpenApiSpecUrl
+      - SharedApiKeyId
+    ParameterLabels:
+      SeedDataUrl:
+        default: 'Seed Data URL'
+      OpenApiSpecUrl:
+        default: 'OpenAPI Specification URL'
+      SharedApiKeyId:
+        default: 'Shared API Key ID (Optional)'
+
+Parameters:
+  SeedDataUrl:
+    Type: String
+    Description: 'URL to fetch utilities seed data from (JSON format)'
+    Default: ''
+  OpenApiSpecUrl:
+    Type: String
+    Description: 'URL to fetch OpenAPI specification from (YAML format)'
+    Default: ''
+  SharedApiKeyId:
+    Type: String
+    Description: '(Optional) ID of a shared API key to use instead of creating a new one'
+    Default: ''
+
+Conditions:
+  UseSharedApiKey: !Not [!Equals [!Ref SharedApiKeyId, '']]
+  CreateOwnApiKey: !Equals [!Ref SharedApiKeyId, '']
+
+Resources:
+  # CloudWatch Log Groups
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/apigateway/${AWS::StackName}'
+      RetentionInDays: 7
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-utilities-api'
+      RetentionInDays: 7
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+  # DynamoDB Tables
+  AccountsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: accountId
+        AttributeType: S
+      - AttributeName: customerId
+        AttributeType: S
+      KeySchema:
+      - AttributeName: accountId
+        KeyType: HASH
+      GlobalSecondaryIndexes:
+      - IndexName: CustomerIndex
+        KeySchema:
+        - AttributeName: customerId
+          KeyType: HASH
+        Projection:
+          ProjectionType: ALL
+      BillingMode: PAY_PER_REQUEST
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+  BillsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: billId
+        AttributeType: S
+      - AttributeName: accountId
+        AttributeType: S
+      KeySchema:
+      - AttributeName: billId
+        KeyType: HASH
+      GlobalSecondaryIndexes:
+      - IndexName: AccountIndex
+        KeySchema:
+        - AttributeName: accountId
+          KeyType: HASH
+        Projection:
+          ProjectionType: ALL
+      BillingMode: PAY_PER_REQUEST
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+  ServiceReqTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: requestId
+        AttributeType: S
+      - AttributeName: accountId
+        AttributeType: S
+      KeySchema:
+      - AttributeName: requestId
+        KeyType: HASH
+      GlobalSecondaryIndexes:
+      - IndexName: AccountIndex
+        KeySchema:
+        - AttributeName: accountId
+          KeyType: HASH
+        Projection:
+          ProjectionType: ALL
+      BillingMode: PAY_PER_REQUEST
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+  OutagesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: outageId
+        AttributeType: S
+      - AttributeName: status
+        AttributeType: S
+      KeySchema:
+      - AttributeName: outageId
+        KeyType: HASH
+      GlobalSecondaryIndexes:
+      - IndexName: StatusIndex
+        KeySchema:
+        - AttributeName: status
+          KeyType: HASH
+        Projection:
+          ProjectionType: ALL
+      BillingMode: PAY_PER_REQUEST
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+  # Lambda Execution Role
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: CloudWatchLogsAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: !Sub '${LambdaLogGroup.Arn}:*'
+      - PolicyName: DynamoDBAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:Query
+            - dynamodb:Scan
+            Resource:
+            - !GetAtt AccountsTable.Arn
+            - !Sub '${AccountsTable.Arn}/index/*'
+            - !GetAtt BillsTable.Arn
+            - !Sub '${BillsTable.Arn}/index/*'
+            - !GetAtt ServiceReqTable.Arn
+            - !Sub '${ServiceReqTable.Arn}/index/*'
+            - !GetAtt OutagesTable.Arn
+            - !Sub '${OutagesTable.Arn}/index/*'
+      - PolicyName: XRayAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - xray:PutTraceSegments
+            - xray:PutTelemetryRecords
+            Resource: '*'
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+  # API Key Retrieval Role
+  ApiKeyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+      - PolicyName: ApiGatewayAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - apigateway:GET
+            Resource: !Sub 'arn:aws:apigateway:${AWS::Region}::/apikeys/*'
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+  # Data Seeding Role
+  SeedRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+      - PolicyName: DynamoDBSeedingAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - dynamodb:PutItem
+            - dynamodb:BatchWriteItem
+            Resource:
+            - !GetAtt AccountsTable.Arn
+            - !GetAtt BillsTable.Arn
+            - !GetAtt ServiceReqTable.Arn
+            - !GetAtt OutagesTable.Arn
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+
+  # Data Seeding Lambda
+  SeedDataFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt SeedRole.Arn
+      Timeout: 300
+      Code:
+        ZipFile: |
+          const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+          const { DynamoDBDocumentClient, BatchWriteCommand } = require('@aws-sdk/lib-dynamodb');
+          const https = require('https');
+
+          const client = new DynamoDBClient({});
+          const docClient = DynamoDBDocumentClient.from(client);
+
+          const sendResponse = async (event, context, status, data = {}) => {
+            const responseBody = JSON.stringify({
+              Status: status,
+              Reason: data.Reason || `See CloudWatch Log Stream: ${context.logStreamName}`,
+              PhysicalResourceId: context.logStreamName,
+              StackId: event.StackId,
+              RequestId: event.RequestId,
+              LogicalResourceId: event.LogicalResourceId,
+              Data: data
+            });
+            
+            const parsedUrl = new URL(event.ResponseURL);
+            const options = {
+              hostname: parsedUrl.hostname,
+              port: 443,
+              path: parsedUrl.pathname + parsedUrl.search,
+              method: 'PUT',
+              headers: { 'Content-Type': '', 'Content-Length': responseBody.length }
+            };
+            
+            return new Promise((resolve, reject) => {
+              const request = https.request(options, (response) => resolve());
+              request.on('error', reject);
+              request.write(responseBody);
+              request.end();
+            });
+          };
+
+          const batchWriteItems = async (tableName, items) => {
+            const batches = [];
+            for (let i = 0; i < items.length; i += 25) {
+              batches.push(items.slice(i, i + 25));
+            }
+            for (const batch of batches) {
+              await docClient.send(new BatchWriteCommand({
+                RequestItems: { [tableName]: batch.map(item => ({ PutRequest: { Item: item } })) }
+              }));
+            }
+          };
+
+          const getDefaultData = () => ({
+            accounts: [
+              { accountId: 'UTL-001', customerId: 'CUST-001', serviceAddress: '123 Main St, Seattle, WA 98101', meterNumber: 'MTR-001', serviceType: 'electric', accountStatus: 'active', enrolledInAutoPay: true, paperlessBilling: true },
+              { accountId: 'UTL-002', customerId: 'CUST-002', serviceAddress: '456 Oak Ave, Portland, OR 97201', meterNumber: 'MTR-002', serviceType: 'gas', accountStatus: 'active', enrolledInAutoPay: false, paperlessBilling: true },
+              { accountId: 'UTL-003', customerId: 'CUST-003', serviceAddress: '789 Pine Rd, Bellevue, WA 98004', meterNumber: 'MTR-003', serviceType: 'combined', accountStatus: 'active', enrolledInAutoPay: true, paperlessBilling: false },
+              { accountId: 'UTL-004', customerId: 'CUST-004', serviceAddress: '321 Elm St, Tacoma, WA 98402', meterNumber: 'MTR-004', serviceType: 'water', accountStatus: 'suspended', enrolledInAutoPay: false, paperlessBilling: false, suspendReason: 'Payment overdue' }
+            ],
+            bills: [
+              { billId: 'BILL-001', accountId: 'UTL-001', billingPeriodStart: '2024-01-01', billingPeriodEnd: '2024-01-31', amountDue: 145.67, dueDate: '2024-02-15', status: 'current', usage: 850, usageUnit: 'kWh', previousBalance: 0, payments: 0 },
+              { billId: 'BILL-002', accountId: 'UTL-001', billingPeriodStart: '2023-12-01', billingPeriodEnd: '2023-12-31', amountDue: 0, dueDate: '2024-01-15', status: 'paid', usage: 920, usageUnit: 'kWh', previousBalance: 0, payments: 168.45 },
+              { billId: 'BILL-003', accountId: 'UTL-002', billingPeriodStart: '2024-01-01', billingPeriodEnd: '2024-01-31', amountDue: 78.90, dueDate: '2024-02-15', status: 'current', usage: 45, usageUnit: 'therms', previousBalance: 0, payments: 0 },
+              { billId: 'BILL-004', accountId: 'UTL-003', billingPeriodStart: '2024-01-01', billingPeriodEnd: '2024-01-31', amountDue: 234.56, dueDate: '2024-02-15', status: 'current', usage: 1200, usageUnit: 'kWh', previousBalance: 0, payments: 0 },
+              { billId: 'BILL-005', accountId: 'UTL-004', billingPeriodStart: '2024-01-01', billingPeriodEnd: '2024-01-31', amountDue: 156.78, dueDate: '2024-02-15', status: 'past-due', usage: 8500, usageUnit: 'gallons', previousBalance: 89.45, payments: 0 }
+            ],
+            serviceRequests: [
+              { requestId: 'SVC-001', accountId: 'UTL-001', requestType: 'start', serviceAddress: '123 Main St, Seattle, WA 98101', requestedDate: '2024-02-01', status: 'completed', createdAt: '2024-01-15T10:00:00Z', completedAt: '2024-02-01T09:00:00Z' },
+              { requestId: 'SVC-002', accountId: 'UTL-002', requestType: 'transfer', serviceAddress: '789 New St, Portland, OR 97202', requestedDate: '2024-02-15', status: 'scheduled', createdAt: '2024-02-01T14:00:00Z' },
+              { requestId: 'SVC-003', accountId: 'UTL-003', requestType: 'stop', serviceAddress: '789 Pine Rd, Bellevue, WA 98004', requestedDate: '2024-03-01', status: 'pending', createdAt: '2024-02-10T11:00:00Z' },
+              { requestId: 'SVC-004', accountId: 'UTL-004', requestType: 'reconnect', serviceAddress: '321 Elm St, Tacoma, WA 98402', requestedDate: '2024-02-20', status: 'pending', createdAt: '2024-02-15T09:00:00Z', notes: 'Payment arrangement made' }
+            ],
+            outages: [
+              { outageId: 'OUT-001', reportedBy: 'CUST-001', serviceAddress: '123 Main St, Seattle, WA 98101', outageType: 'power', status: 'investigating', estimatedRestoration: '2024-02-15T18:00:00Z', createdAt: '2024-02-15T10:00:00Z', affectedCustomers: 250, description: 'Transformer failure in downtown area' },
+              { outageId: 'OUT-002', reportedBy: 'system', serviceAddress: 'North Seattle Region', outageType: 'power', status: 'crew-dispatched', estimatedRestoration: '2024-02-15T20:00:00Z', createdAt: '2024-02-15T08:30:00Z', affectedCustomers: 1500, description: 'Storm damage to power lines' },
+              { outageId: 'OUT-003', reportedBy: 'CUST-003', serviceAddress: '789 Pine Rd, Bellevue, WA 98004', outageType: 'gas', status: 'resolved', createdAt: '2024-02-14T14:00:00Z', resolvedAt: '2024-02-14T16:30:00Z', description: 'Gas leak repaired' },
+              { outageId: 'OUT-004', reportedBy: 'CUST-002', serviceAddress: '456 Oak Ave, Portland, OR 97201', outageType: 'water', status: 'confirmed', estimatedRestoration: '2024-02-15T22:00:00Z', createdAt: '2024-02-15T12:00:00Z', affectedCustomers: 75, description: 'Water main break' }
+            ]
+          });
+
+          exports.handler = async (event, context) => {
+            console.log('Event:', JSON.stringify(event, null, 2));
+            try {
+              if (event.RequestType === 'Delete' || event.RequestType === 'Update') {
+                await sendResponse(event, context, 'SUCCESS', {});
+                return;
+              }
+              
+              const { AccountsTableName, BillsTableName, ServiceReqTableName, OutagesTableName } = event.ResourceProperties;
+              const data = getDefaultData();
+              
+              await batchWriteItems(AccountsTableName, data.accounts);
+              await batchWriteItems(BillsTableName, data.bills);
+              await batchWriteItems(ServiceReqTableName, data.serviceRequests);
+              await batchWriteItems(OutagesTableName, data.outages);
+              
+              await sendResponse(event, context, 'SUCCESS', { Message: 'Data seeded successfully' });
+            } catch (error) {
+              console.error('Error:', error);
+              await sendResponse(event, context, 'FAILED', { Reason: error.message });
+            }
+          };
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+
+  # Lambda Functions for API Operations
+  GetAccountFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 30
+      TracingConfig:
+        Mode: Active
+      Environment:
+        Variables:
+          ACCOUNTS_TABLE: !Ref AccountsTable
+      Code:
+        ZipFile: |
+          const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+          const { DynamoDBDocumentClient, QueryCommand, GetCommand } = require('@aws-sdk/lib-dynamodb');
+
+          const client = new DynamoDBClient({});
+          const docClient = DynamoDBDocumentClient.from(client);
+
+          exports.handler = async (event) => {
+            try {
+              const accountId = event.pathParameters?.accountId;
+              const customerId = event.queryStringParameters?.customerId;
+              
+              if (accountId) {
+                const result = await docClient.send(new GetCommand({
+                  TableName: process.env.ACCOUNTS_TABLE,
+                  Key: { accountId }
+                }));
+                if (!result.Item) {
+                  return { statusCode: 404, headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ error: 'Account not found', code: 'NOT_FOUND' }) };
+                }
+                return { statusCode: 200, headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ account: result.Item }) };
+              }
+              
+              if (customerId) {
+                const result = await docClient.send(new QueryCommand({
+                  TableName: process.env.ACCOUNTS_TABLE,
+                  IndexName: 'CustomerIndex',
+                  KeyConditionExpression: 'customerId = :cid',
+                  ExpressionAttributeValues: { ':cid': customerId }
+                }));
+                return { statusCode: 200, headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ accounts: result.Items || [], count: result.Items?.length || 0 }) };
+              }
+              
+              return { statusCode: 400, headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ error: 'Missing accountId or customerId parameter', code: 'MISSING_PARAMETER' }) };
+            } catch (error) {
+              console.error('Error:', error);
+              return { statusCode: 500, headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ error: 'Internal server error', details: error.message }) };
+            }
+          };
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+  GetBillsFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 30
+      TracingConfig:
+        Mode: Active
+      Environment:
+        Variables:
+          BILLS_TABLE: !Ref BillsTable
+      Code:
+        ZipFile: |
+          const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+          const { DynamoDBDocumentClient, QueryCommand, GetCommand } = require('@aws-sdk/lib-dynamodb');
+
+          const client = new DynamoDBClient({});
+          const docClient = DynamoDBDocumentClient.from(client);
+
+          exports.handler = async (event) => {
+            try {
+              const billId = event.pathParameters?.billId;
+              const accountId = event.queryStringParameters?.accountId;
+              
+              if (billId) {
+                const result = await docClient.send(new GetCommand({
+                  TableName: process.env.BILLS_TABLE,
+                  Key: { billId }
+                }));
+                if (!result.Item) {
+                  return { statusCode: 404, headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ error: 'Bill not found', code: 'NOT_FOUND' }) };
+                }
+                return { statusCode: 200, headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ bill: result.Item }) };
+              }
+              
+              if (accountId) {
+                const result = await docClient.send(new QueryCommand({
+                  TableName: process.env.BILLS_TABLE,
+                  IndexName: 'AccountIndex',
+                  KeyConditionExpression: 'accountId = :aid',
+                  ExpressionAttributeValues: { ':aid': accountId }
+                }));
+                return { statusCode: 200, headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ bills: result.Items || [], count: result.Items?.length || 0 }) };
+              }
+              
+              return { statusCode: 400, headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ error: 'Missing billId or accountId parameter', code: 'MISSING_PARAMETER' }) };
+            } catch (error) {
+              console.error('Error:', error);
+              return { statusCode: 500, headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ error: 'Internal server error', details: error.message }) };
+            }
+          };
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+  GetUsageFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 30
+      TracingConfig:
+        Mode: Active
+      Environment:
+        Variables:
+          ACCOUNTS_TABLE: !Ref AccountsTable
+          BILLS_TABLE: !Ref BillsTable
+      Code:
+        ZipFile: |
+          const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+          const { DynamoDBDocumentClient, GetCommand, QueryCommand } = require('@aws-sdk/lib-dynamodb');
+
+          const client = new DynamoDBClient({});
+          const docClient = DynamoDBDocumentClient.from(client);
+
+          exports.handler = async (event) => {
+            try {
+              const accountId = event.pathParameters?.accountId;
+              
+              if (!accountId) {
+                return { statusCode: 400, headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ error: 'Missing accountId parameter', code: 'MISSING_PARAMETER' }) };
+              }
+              
+              const accountResult = await docClient.send(new GetCommand({
+                TableName: process.env.ACCOUNTS_TABLE,
+                Key: { accountId }
+              }));
+              
+              if (!accountResult.Item) {
+                return { statusCode: 404, headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ error: 'Account not found', code: 'NOT_FOUND' }) };
+              }
+              
+              const billsResult = await docClient.send(new QueryCommand({
+                TableName: process.env.BILLS_TABLE,
+                IndexName: 'AccountIndex',
+                KeyConditionExpression: 'accountId = :aid',
+                ExpressionAttributeValues: { ':aid': accountId },
+                Limit: 12
+              }));
+              
+              const usageHistory = (billsResult.Items || []).map(bill => ({
+                period: `${bill.billingPeriodStart} to ${bill.billingPeriodEnd}`,
+                usage: bill.usage,
+                usageUnit: bill.usageUnit,
+                amount: bill.amountDue
+              }));
+              
+              const usage = {
+                accountId: accountResult.Item.accountId,
+                serviceType: accountResult.Item.serviceType,
+                meterNumber: accountResult.Item.meterNumber,
+                usageHistory
+              };
+              
+              return { statusCode: 200, headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ usage }) };
+            } catch (error) {
+              console.error('Error:', error);
+              return { statusCode: 500, headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ error: 'Internal server error', details: error.message }) };
+            }
+          };
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+
+  GetOutagesFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 30
+      TracingConfig:
+        Mode: Active
+      Environment:
+        Variables:
+          OUTAGES_TABLE: !Ref OutagesTable
+      Code:
+        ZipFile: |
+          const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+          const { DynamoDBDocumentClient, QueryCommand, GetCommand, ScanCommand } = require('@aws-sdk/lib-dynamodb');
+
+          const client = new DynamoDBClient({});
+          const docClient = DynamoDBDocumentClient.from(client);
+
+          exports.handler = async (event) => {
+            try {
+              const outageId = event.pathParameters?.outageId;
+              const status = event.queryStringParameters?.status;
+              
+              if (outageId) {
+                const result = await docClient.send(new GetCommand({
+                  TableName: process.env.OUTAGES_TABLE,
+                  Key: { outageId }
+                }));
+                if (!result.Item) {
+                  return { statusCode: 404, headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ error: 'Outage not found', code: 'NOT_FOUND' }) };
+                }
+                return { statusCode: 200, headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ outage: result.Item }) };
+              }
+              
+              if (status) {
+                const result = await docClient.send(new QueryCommand({
+                  TableName: process.env.OUTAGES_TABLE,
+                  IndexName: 'StatusIndex',
+                  KeyConditionExpression: '#status = :status',
+                  ExpressionAttributeNames: { '#status': 'status' },
+                  ExpressionAttributeValues: { ':status': status }
+                }));
+                return { statusCode: 200, headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ outages: result.Items || [], count: result.Items?.length || 0 }) };
+              }
+              
+              // Return all active outages by default
+              const result = await docClient.send(new ScanCommand({
+                TableName: process.env.OUTAGES_TABLE,
+                FilterExpression: '#status <> :resolved',
+                ExpressionAttributeNames: { '#status': 'status' },
+                ExpressionAttributeValues: { ':resolved': 'resolved' }
+              }));
+              return { statusCode: 200, headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ outages: result.Items || [], count: result.Items?.length || 0 }) };
+            } catch (error) {
+              console.error('Error:', error);
+              return { statusCode: 500, headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ error: 'Internal server error', details: error.message }) };
+            }
+          };
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+  ReportOutageFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 30
+      TracingConfig:
+        Mode: Active
+      Environment:
+        Variables:
+          OUTAGES_TABLE: !Ref OutagesTable
+      Code:
+        ZipFile: |
+          const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+          const { DynamoDBDocumentClient, PutCommand } = require('@aws-sdk/lib-dynamodb');
+
+          const client = new DynamoDBClient({});
+          const docClient = DynamoDBDocumentClient.from(client);
+
+          exports.handler = async (event) => {
+            try {
+              const body = JSON.parse(event.body || '{}');
+              const { customerId, serviceAddress, outageType, description } = body;
+              
+              const missing = [];
+              if (!customerId) missing.push('customerId');
+              if (!serviceAddress) missing.push('serviceAddress');
+              if (!outageType) missing.push('outageType');
+              
+              if (missing.length > 0) {
+                return { statusCode: 400, headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ error: 'Missing required fields', code: 'MISSING_FIELDS', details: missing.join(', ') }) };
+              }
+              
+              const validTypes = ['power', 'gas', 'water'];
+              if (!validTypes.includes(outageType)) {
+                return { statusCode: 400, headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ error: 'Invalid outage type', code: 'INVALID_TYPE', details: `Must be one of: ${validTypes.join(', ')}` }) };
+              }
+              
+              const outageId = `OUT-${Math.floor(Math.random() * 1000000).toString().padStart(6, '0')}`;
+              const outage = {
+                outageId,
+                reportedBy: customerId,
+                serviceAddress,
+                outageType,
+                description: description || 'Customer reported outage',
+                status: 'reported',
+                createdAt: new Date().toISOString()
+              };
+              
+              await docClient.send(new PutCommand({ TableName: process.env.OUTAGES_TABLE, Item: outage }));
+              
+              return { statusCode: 201, headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ outage, message: 'Outage reported successfully' }) };
+            } catch (error) {
+              console.error('Error:', error);
+              return { statusCode: 500, headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ error: 'Internal server error', details: error.message }) };
+            }
+          };
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+  GetSvcReqFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 30
+      TracingConfig:
+        Mode: Active
+      Environment:
+        Variables:
+          SERVICE_REQ_TABLE: !Ref ServiceReqTable
+      Code:
+        ZipFile: |
+          const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+          const { DynamoDBDocumentClient, QueryCommand, GetCommand } = require('@aws-sdk/lib-dynamodb');
+
+          const client = new DynamoDBClient({});
+          const docClient = DynamoDBDocumentClient.from(client);
+
+          exports.handler = async (event) => {
+            try {
+              const requestId = event.pathParameters?.requestId;
+              const accountId = event.queryStringParameters?.accountId;
+              
+              if (requestId) {
+                const result = await docClient.send(new GetCommand({
+                  TableName: process.env.SERVICE_REQ_TABLE,
+                  Key: { requestId }
+                }));
+                if (!result.Item) {
+                  return { statusCode: 404, headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ error: 'Service request not found', code: 'NOT_FOUND' }) };
+                }
+                return { statusCode: 200, headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ serviceRequest: result.Item }) };
+              }
+              
+              if (accountId) {
+                const result = await docClient.send(new QueryCommand({
+                  TableName: process.env.SERVICE_REQ_TABLE,
+                  IndexName: 'AccountIndex',
+                  KeyConditionExpression: 'accountId = :aid',
+                  ExpressionAttributeValues: { ':aid': accountId }
+                }));
+                return { statusCode: 200, headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ serviceRequests: result.Items || [], count: result.Items?.length || 0 }) };
+              }
+              
+              return { statusCode: 400, headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ error: 'Missing requestId or accountId parameter', code: 'MISSING_PARAMETER' }) };
+            } catch (error) {
+              console.error('Error:', error);
+              return { statusCode: 500, headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ error: 'Internal server error', details: error.message }) };
+            }
+          };
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+  CreateSvcReqFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 30
+      TracingConfig:
+        Mode: Active
+      Environment:
+        Variables:
+          SERVICE_REQ_TABLE: !Ref ServiceReqTable
+      Code:
+        ZipFile: |
+          const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+          const { DynamoDBDocumentClient, PutCommand } = require('@aws-sdk/lib-dynamodb');
+
+          const client = new DynamoDBClient({});
+          const docClient = DynamoDBDocumentClient.from(client);
+
+          exports.handler = async (event) => {
+            try {
+              const body = JSON.parse(event.body || '{}');
+              const { accountId, requestType, serviceAddress, requestedDate, notes } = body;
+              
+              const missing = [];
+              if (!accountId) missing.push('accountId');
+              if (!requestType) missing.push('requestType');
+              if (!serviceAddress) missing.push('serviceAddress');
+              if (!requestedDate) missing.push('requestedDate');
+              
+              if (missing.length > 0) {
+                return { statusCode: 400, headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ error: 'Missing required fields', code: 'MISSING_FIELDS', details: missing.join(', ') }) };
+              }
+              
+              const validTypes = ['start', 'stop', 'transfer', 'reconnect'];
+              if (!validTypes.includes(requestType)) {
+                return { statusCode: 400, headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ error: 'Invalid request type', code: 'INVALID_TYPE', details: `Must be one of: ${validTypes.join(', ')}` }) };
+              }
+              
+              const requestId = `SVC-${Math.floor(Math.random() * 1000000).toString().padStart(6, '0')}`;
+              const serviceRequest = {
+                requestId,
+                accountId,
+                requestType,
+                serviceAddress,
+                requestedDate,
+                status: 'pending',
+                createdAt: new Date().toISOString()
+              };
+              
+              if (notes) serviceRequest.notes = notes;
+              
+              await docClient.send(new PutCommand({ TableName: process.env.SERVICE_REQ_TABLE, Item: serviceRequest }));
+              
+              return { statusCode: 201, headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ serviceRequest, message: 'Service request created successfully' }) };
+            } catch (error) {
+              console.error('Error:', error);
+              return { statusCode: 500, headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ error: 'Internal server error', details: error.message }) };
+            }
+          };
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+
+  # API Gateway REST API
+  UtilitiesApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub '${AWS::StackName}-UtilitiesAPI'
+      Description: 'Utilities Customer Service API for AI agent demonstrations'
+      ApiKeySourceType: HEADER
+      Body:
+        openapi: '3.0.1'
+        info:
+          title: 'Utilities Customer Service API'
+          description: 'API for managing utility operations including accounts, bills, usage, outages, and service requests'
+          version: '1.0.0'
+        paths:
+          /accounts:
+            get:
+              operationId: 'getAccountsByCustomer'
+              summary: 'Get accounts by customer ID'
+              security:
+              - api_key: []
+              parameters:
+              - name: customerId
+                in: query
+                required: true
+                schema:
+                  type: 'string'
+              responses:
+                '200':
+                  description: 'List of accounts'
+                '400':
+                  description: 'Missing required parameter'
+                '401':
+                  description: 'Unauthorized - API key required'
+              x-amazon-apigateway-integration:
+                type: 'aws_proxy'
+                httpMethod: 'POST'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetAccountFn.Arn}/invocations'
+          /accounts/{accountId}:
+            get:
+              operationId: 'getAccountById'
+              summary: 'Get account by ID'
+              security:
+              - api_key: []
+              parameters:
+              - name: accountId
+                in: path
+                required: true
+                schema:
+                  type: 'string'
+              responses:
+                '200':
+                  description: 'Account details'
+                '404':
+                  description: 'Account not found'
+                '401':
+                  description: 'Unauthorized - API key required'
+              x-amazon-apigateway-integration:
+                type: 'aws_proxy'
+                httpMethod: 'POST'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetAccountFn.Arn}/invocations'
+          /accounts/{accountId}/usage:
+            get:
+              operationId: 'getUsageByAccount'
+              summary: 'Get usage history for an account'
+              security:
+              - api_key: []
+              parameters:
+              - name: accountId
+                in: path
+                required: true
+                schema:
+                  type: 'string'
+              responses:
+                '200':
+                  description: 'Usage history'
+                '404':
+                  description: 'Account not found'
+                '401':
+                  description: 'Unauthorized - API key required'
+              x-amazon-apigateway-integration:
+                type: 'aws_proxy'
+                httpMethod: 'POST'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetUsageFn.Arn}/invocations'
+          /bills:
+            get:
+              operationId: 'getBillsByAccount'
+              summary: 'Get bills by account ID'
+              security:
+              - api_key: []
+              parameters:
+              - name: accountId
+                in: query
+                required: true
+                schema:
+                  type: 'string'
+              responses:
+                '200':
+                  description: 'List of bills'
+                '400':
+                  description: 'Missing required parameter'
+                '401':
+                  description: 'Unauthorized - API key required'
+              x-amazon-apigateway-integration:
+                type: 'aws_proxy'
+                httpMethod: 'POST'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetBillsFn.Arn}/invocations'
+          /bills/{billId}:
+            get:
+              operationId: 'getBillById'
+              summary: 'Get bill by ID'
+              security:
+              - api_key: []
+              parameters:
+              - name: billId
+                in: path
+                required: true
+                schema:
+                  type: 'string'
+              responses:
+                '200':
+                  description: 'Bill details'
+                '404':
+                  description: 'Bill not found'
+                '401':
+                  description: 'Unauthorized - API key required'
+              x-amazon-apigateway-integration:
+                type: 'aws_proxy'
+                httpMethod: 'POST'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetBillsFn.Arn}/invocations'
+          /outages:
+            get:
+              operationId: 'getOutages'
+              summary: 'Get service outages'
+              security:
+              - api_key: []
+              parameters:
+              - name: status
+                in: query
+                required: false
+                schema:
+                  type: 'string'
+              responses:
+                '200':
+                  description: 'List of outages'
+                '401':
+                  description: 'Unauthorized - API key required'
+              x-amazon-apigateway-integration:
+                type: 'aws_proxy'
+                httpMethod: 'POST'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetOutagesFn.Arn}/invocations'
+            post:
+              operationId: 'reportOutage'
+              summary: 'Report a service outage'
+              security:
+              - api_key: []
+              requestBody:
+                required: true
+                content:
+                  application/json:
+                    schema:
+                      type: 'object'
+                      required:
+                      - customerId
+                      - serviceAddress
+                      - outageType
+              responses:
+                '201':
+                  description: 'Outage reported'
+                '400':
+                  description: 'Invalid request'
+                '401':
+                  description: 'Unauthorized - API key required'
+              x-amazon-apigateway-integration:
+                type: 'aws_proxy'
+                httpMethod: 'POST'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ReportOutageFn.Arn}/invocations'
+          /outages/{outageId}:
+            get:
+              operationId: 'getOutageById'
+              summary: 'Get outage by ID'
+              security:
+              - api_key: []
+              parameters:
+              - name: outageId
+                in: path
+                required: true
+                schema:
+                  type: 'string'
+              responses:
+                '200':
+                  description: 'Outage details'
+                '404':
+                  description: 'Outage not found'
+                '401':
+                  description: 'Unauthorized - API key required'
+              x-amazon-apigateway-integration:
+                type: 'aws_proxy'
+                httpMethod: 'POST'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetOutagesFn.Arn}/invocations'
+          /service-requests:
+            get:
+              operationId: 'getServiceRequestsByAccount'
+              summary: 'Get service requests by account ID'
+              security:
+              - api_key: []
+              parameters:
+              - name: accountId
+                in: query
+                required: true
+                schema:
+                  type: 'string'
+              responses:
+                '200':
+                  description: 'List of service requests'
+                '400':
+                  description: 'Missing required parameter'
+                '401':
+                  description: 'Unauthorized - API key required'
+              x-amazon-apigateway-integration:
+                type: 'aws_proxy'
+                httpMethod: 'POST'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetSvcReqFn.Arn}/invocations'
+            post:
+              operationId: 'createServiceRequest'
+              summary: 'Create a service request (start, stop, transfer)'
+              security:
+              - api_key: []
+              requestBody:
+                required: true
+                content:
+                  application/json:
+                    schema:
+                      type: 'object'
+                      required:
+                      - accountId
+                      - requestType
+                      - serviceAddress
+                      - requestedDate
+              responses:
+                '201':
+                  description: 'Service request created'
+                '400':
+                  description: 'Invalid request'
+                '401':
+                  description: 'Unauthorized - API key required'
+              x-amazon-apigateway-integration:
+                type: 'aws_proxy'
+                httpMethod: 'POST'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateSvcReqFn.Arn}/invocations'
+          /service-requests/{requestId}:
+            get:
+              operationId: 'getServiceRequestById'
+              summary: 'Get service request by ID'
+              security:
+              - api_key: []
+              parameters:
+              - name: requestId
+                in: path
+                required: true
+                schema:
+                  type: 'string'
+              responses:
+                '200':
+                  description: 'Service request details'
+                '404':
+                  description: 'Service request not found'
+                '401':
+                  description: 'Unauthorized - API key required'
+              x-amazon-apigateway-integration:
+                type: 'aws_proxy'
+                httpMethod: 'POST'
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetSvcReqFn.Arn}/invocations'
+        components:
+          securitySchemes:
+            api_key:
+              type: 'apiKey'
+              name: 'X-API-Key'
+              in: 'header'
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+
+  # API Deployment
+  UtilitiesApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId: !Ref UtilitiesApi
+      Description: !Sub 'Deployment for ${AWS::StackName} Utilities API'
+    DeletionPolicy: Delete
+
+  # API Stage
+  UtilitiesApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref UtilitiesApi
+      DeploymentId: !Ref UtilitiesApiDeployment
+      StageName: dev
+      Description: Development stage for Utilities Customer Service API
+      TracingEnabled: true
+      AccessLogSetting:
+        DestinationArn: !GetAtt ApiLogGroup.Arn
+        Format: '$context.requestId $context.extendedRequestId $context.identity.sourceIp $context.requestTime $context.httpMethod $context.routeKey $context.status $context.protocol $context.responseLength'
+      MethodSettings:
+      - ResourcePath: '/*'
+        HttpMethod: '*'
+        MetricsEnabled: true
+        DataTraceEnabled: true
+        LoggingLevel: INFO
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+  # API Key (only created when not using shared key)
+  UtilitiesApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Condition: CreateOwnApiKey
+    DependsOn: UtilitiesApiStage
+    Properties:
+      Name: !Sub '${AWS::StackName}-ApiKey'
+      Description: API key for Utilities Customer Service API
+      Enabled: true
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+  # Usage Plan
+  UtilitiesApiUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn: UtilitiesApiStage
+    Properties:
+      UsagePlanName: !Sub '${AWS::StackName}-UsagePlan'
+      Description: Usage plan for Utilities Customer Service API
+      ApiStages:
+      - ApiId: !Ref UtilitiesApi
+        Stage: dev
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+  # Usage Plan Key - associates the effective API key with the usage plan
+  UtilitiesApiUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !If [UseSharedApiKey, !Ref SharedApiKeyId, !Ref UtilitiesApiKey]
+      KeyType: API_KEY
+      UsagePlanId: !Ref UtilitiesApiUsagePlan
+    DeletionPolicy: Delete
+
+  # Lambda Permissions for API Gateway
+  GetAccountPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref GetAccountFn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UtilitiesApi}/*/*/*'
+    DeletionPolicy: Delete
+
+  GetBillsPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref GetBillsFn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UtilitiesApi}/*/*/*'
+    DeletionPolicy: Delete
+
+  GetUsagePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref GetUsageFn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UtilitiesApi}/*/*/*'
+    DeletionPolicy: Delete
+
+  GetOutagesPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref GetOutagesFn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UtilitiesApi}/*/*/*'
+    DeletionPolicy: Delete
+
+  ReportOutagePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ReportOutageFn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UtilitiesApi}/*/*/*'
+    DeletionPolicy: Delete
+
+  GetSvcReqPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref GetSvcReqFn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UtilitiesApi}/*/*/*'
+    DeletionPolicy: Delete
+
+  CreateSvcReqPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CreateSvcReqFn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UtilitiesApi}/*/*/*'
+    DeletionPolicy: Delete
+
+  # S3 Bucket for OpenAPI Specification
+  OpenApiBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+  # Custom Resource Lambda Role for S3 Upload
+  S3UploadRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+      - PolicyName: S3Access
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - s3:PutObject
+            - s3:DeleteObject
+            - s3:GetObject
+            - s3:GetObjectVersion
+            - s3:ListBucket
+            Resource:
+            - !Sub '${OpenApiBucket.Arn}'
+            - !Sub '${OpenApiBucket.Arn}/*'
+          - Effect: Allow
+            Action:
+            - s3:GetObject
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - cloudformation:DescribeStacks
+            Resource: !Ref 'AWS::StackId'
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+
+  # Custom Resource Lambda for API Key Retrieval
+  ApiKeyFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.13
+      Handler: index.handler
+      Role: !GetAtt ApiKeyRole.Arn
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import urllib3
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          http = urllib3.PoolManager()
+          apigateway = boto3.client('apigateway')
+
+          def send_response(event, context, status, data=None, physical_resource_id=None, reason=None):
+              response_body = {
+                  'Status': status,
+                  'Reason': reason or f'See CloudWatch Log Stream: {context.log_stream_name}',
+                  'PhysicalResourceId': physical_resource_id or context.log_stream_name,
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Data': data or {}
+              }
+              
+              logger.info(f'Response body: {json.dumps(response_body)}')
+              
+              try:
+                  response = http.request(
+                      'PUT',
+                      event['ResponseURL'],
+                      body=json.dumps(response_body).encode('utf-8'),
+                      headers={'Content-Type': ''}
+                  )
+                  logger.info(f'CloudFormation response status: {response.status}')
+              except Exception as e:
+                  logger.error(f'Error sending response: {str(e)}')
+                  raise
+
+          def handler(event, context):
+              logger.info(f'Event: {json.dumps(event)}')
+              
+              try:
+                  request_type = event['RequestType']
+                  
+                  if request_type == 'Delete':
+                      logger.info('Delete request - no action needed')
+                      send_response(event, context, 'SUCCESS', {})
+                      return
+                  
+                  api_key_id = event['ResourceProperties']['ApiKeyId']
+                  logger.info(f'Retrieving API key value for: {api_key_id}')
+                  
+                  response = apigateway.get_api_key(
+                      apiKey=api_key_id,
+                      includeValue=True
+                  )
+                  
+                  api_key_value = response['value']
+                  logger.info('Successfully retrieved API key value')
+                  
+                  send_response(
+                      event, 
+                      context, 
+                      'SUCCESS', 
+                      data={'ApiKeyValue': api_key_value},
+                      physical_resource_id=api_key_id
+                  )
+                  
+              except Exception as e:
+                  logger.error(f'Error retrieving API key: {str(e)}')
+                  send_response(event, context, 'FAILED', reason=str(e))
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+  # Custom Resource Lambda for S3 Upload
+  S3UploadFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.13
+      Handler: index.handler
+      Role: !GetAtt S3UploadRole.Arn
+      Timeout: 300
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import urllib3
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          http = urllib3.PoolManager()
+          s3 = boto3.client('s3')
+
+          def send_response(event, context, status, data=None, physical_resource_id=None, reason=None):
+              response_body = {
+                  'Status': status,
+                  'Reason': reason or f'See CloudWatch Log Stream: {context.log_stream_name}',
+                  'PhysicalResourceId': physical_resource_id or context.log_stream_name,
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Data': data or {}
+              }
+              
+              logger.info(f'Response body: {json.dumps(response_body)}')
+              
+              try:
+                  response = http.request(
+                      'PUT',
+                      event['ResponseURL'],
+                      body=json.dumps(response_body).encode('utf-8'),
+                      headers={'Content-Type': ''}
+                  )
+                  logger.info(f'CloudFormation response status: {response.status}')
+              except Exception as e:
+                  logger.error(f'Error sending response: {str(e)}')
+                  raise
+
+          def handler(event, context):
+              logger.info(f'Event: {json.dumps(event)}')
+              
+              try:
+                  request_type = event['RequestType']
+                  
+                  if request_type == 'Delete':
+                      logger.info('Delete request - removing OpenAPI spec from S3')
+                      try:
+                          bucket_name = event['ResourceProperties']['BucketName']
+                          s3.delete_object(Bucket=bucket_name, Key='utilities-api-openapi.yaml')
+                          logger.info('Successfully deleted OpenAPI spec from S3')
+                      except Exception as e:
+                          logger.warning(f'Error deleting from S3: {str(e)}')
+                      
+                      send_response(event, context, 'SUCCESS', {})
+                      return
+                  
+                  bucket_name = event['ResourceProperties']['BucketName']
+                  openapi_url = event['ResourceProperties']['OpenApiSpecUrl']
+                  api_gateway_url = event['ResourceProperties']['ApiGatewayUrl']
+                  
+                  logger.info(f'Bucket: {bucket_name}, OpenAPI URL: {openapi_url}')
+                  
+                  if openapi_url.startswith('s3://'):
+                      parts = openapi_url[5:].split('/', 1)
+                      source_bucket = parts[0]
+                      source_key = parts[1] if len(parts) > 1 else ''
+                      
+                      logger.info(f'Fetching from S3: bucket={source_bucket}, key={source_key}')
+                      response = s3.get_object(Bucket=source_bucket, Key=source_key)
+                      openapi_content = response['Body'].read().decode('utf-8')
+                  else:
+                      response = http.request('GET', openapi_url)
+                      if response.status != 200:
+                          raise Exception(f'Failed to fetch OpenAPI spec: HTTP {response.status}')
+                      openapi_content = response.data.decode('utf-8')
+                  
+                  logger.info(f'Fetched OpenAPI spec ({len(openapi_content)} bytes)')
+                  
+                  updated_content = openapi_content.replace('${API_GATEWAY_URL}', api_gateway_url)
+                  
+                  s3.put_object(
+                      Bucket=bucket_name,
+                      Key='utilities-api-openapi.yaml',
+                      Body=updated_content.encode('utf-8'),
+                      ContentType='application/x-yaml'
+                  )
+                  
+                  s3_location = f's3://{bucket_name}/utilities-api-openapi.yaml'
+                  logger.info(f'Successfully uploaded OpenAPI spec to {s3_location}')
+                  
+                  send_response(
+                      event, context, 'SUCCESS',
+                      data={'S3Location': s3_location},
+                      physical_resource_id=s3_location
+                  )
+                  
+              except Exception as e:
+                  logger.error(f'Error uploading OpenAPI spec: {str(e)}')
+                  send_response(event, context, 'FAILED', reason=str(e))
+      Tags:
+      - Key: Environment
+        Value: NonProd
+      - Key: Name
+        Value: NovaVoice
+      - Key: contact
+        Value: askdevopscloud@spglobal.com
+      - Key: AppID
+        Value: ASP0017650
+      - Key: CreatedBy
+        Value: Abhay.Lunkad
+      - Key: Owner
+        Value: anuthama.c@spglobal.com
+    DeletionPolicy: Delete
+
+  # Custom Resource for API Key Value Retrieval (only when creating own key)
+  ApiKeyValueRetrieval:
+    Type: Custom::ApiKeyValueRetrieval
+    Condition: CreateOwnApiKey
+    DependsOn:
+    - UtilitiesApiKey
+    - UtilitiesApiUsagePlanKey
+    Properties:
+      ServiceToken: !GetAtt ApiKeyFn.Arn
+      ApiKeyId: !Ref UtilitiesApiKey
+
+  # Custom Resource for Data Seeding
+  DataSeeding:
+    Type: Custom::DataSeeding
+    DependsOn:
+    - AccountsTable
+    - BillsTable
+    - ServiceReqTable
+    - OutagesTable
+    Properties:
+      ServiceToken: !GetAtt SeedDataFn.Arn
+      AccountsTableName: !Ref AccountsTable
+      BillsTableName: !Ref BillsTable
+      ServiceReqTableName: !Ref ServiceReqTable
+      OutagesTableName: !Ref OutagesTable
+      SeedDataUrl: !Ref SeedDataUrl
+
+  # Custom Resource for OpenAPI Upload
+  OpenApiUpload:
+    Type: Custom::OpenApiUpload
+    DependsOn:
+    - OpenApiBucket
+    - UtilitiesApiStage
+    Properties:
+      ServiceToken: !GetAtt S3UploadFn.Arn
+      BucketName: !Ref OpenApiBucket
+      OpenApiSpecUrl: !Ref OpenApiSpecUrl
+      ApiGatewayUrl: !Sub 'https://${UtilitiesApi}.execute-api.${AWS::Region}.amazonaws.com/dev'
+
+Outputs:
+  # Required output: API endpoint URL
+  ApiUrl:
+    Description: URL of the Utilities Customer Service API
+    Value: !Sub 'https://${UtilitiesApi}.execute-api.${AWS::Region}.amazonaws.com/dev'
+
+  # Required output: API key value (only when creating own key)
+  ApiKey:
+    Condition: CreateOwnApiKey
+    Description: Value of the API Key for authentication
+    Value: !GetAtt ApiKeyValueRetrieval.ApiKeyValue
+
+  # ID of the effective API key (shared or own)
+  ApiKeyId:
+    Description: ID of the effective API key (shared or own)
+    Value: !If [UseSharedApiKey, !Ref SharedApiKeyId, !Ref UtilitiesApiKey]
+
+  # Required output: S3 location of OpenAPI spec
+  OpenApiSpecS3Location:
+    Description: S3 location of the uploaded OpenAPI specification
+    Value: !GetAtt OpenApiUpload.S3Location
+
+  # Additional outputs for reference
+  AccountsTableName:
+    Description: Name of the DynamoDB Accounts table
+    Value: !Ref AccountsTable
+
+  BillsTableName:
+    Description: Name of the DynamoDB Bills table
+    Value: !Ref BillsTable
+
+  ServiceReqTableName:
+    Description: Name of the DynamoDB Service Requests table
+    Value: !Ref ServiceReqTable
+
+  OutagesTableName:
+    Description: Name of the DynamoDB Outages table
+    Value: !Ref OutagesTable

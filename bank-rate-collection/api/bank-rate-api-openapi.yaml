@@ -1,0 +1,686 @@
+openapi: 3.0.1
+info:
+  title: Bank Rate Collection API
+  description: >-
+    REST API for collecting bank deposit rates (CDs, Money Market, IRA, Savings, Checking, Specials)
+    on behalf of S&P Global Ratewatch. Each endpoint corresponds to one product category collected
+    by the Ryan AI agent during an outbound call to a bank.
+  version: 1.0.0
+  contact:
+    name: S&P Global Ratewatch Engineering
+
+servers:
+  - url: ${API_GATEWAY_URL}
+    description: AWS API Gateway endpoint
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+
+  # ─────────────────────────────────────────────
+  # CALL SESSION
+  # ─────────────────────────────────────────────
+  /sessions:
+    post:
+      operationId: startCallSession
+      summary: Start a new rate-collection call session
+      description: >-
+        Creates a call session record before Ryan begins collecting rates.
+        Returns a sessionId used by all subsequent rate submission calls.
+      tags: [Session]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bankName, phoneNumber]
+              properties:
+                bankName:
+                  type: string
+                  description: Name of the bank being called
+                  example: "First National Bank"
+                phoneNumber:
+                  type: string
+                  description: Phone number dialed (E.164)
+                  example: "+15551234567"
+                contactId:
+                  type: string
+                  description: Amazon Connect contact ID for this call
+                  example: "abc12345-1234-1234-1234-abc123456789"
+      responses:
+        '200':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessionId:
+                    type: string
+                    description: Unique session identifier to use in all subsequent calls
+                  message:
+                    type: string
+
+  /sessions/{sessionId}:
+    get:
+      operationId: getCallSession
+      summary: Get current call session state
+      description: Returns the current collection state for a session — useful for resuming interrupted calls.
+      tags: [Session]
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Session state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessionId:
+                    type: string
+                  bankName:
+                    type: string
+                  phoneNumber:
+                    type: string
+                  status:
+                    type: string
+                    enum: [in-progress, complete, incomplete, voicemail, email, dnc]
+                  collectedProducts:
+                    type: array
+                    items:
+                      type: string
+                    description: List of product types already collected in this session
+                  bankerName:
+                    type: string
+        '404':
+          description: Session not found
+
+  # ─────────────────────────────────────────────
+  # RATE SUBMISSION — CD (Steps 1–4)
+  # ─────────────────────────────────────────────
+  /rates/cd:
+    post:
+      operationId: submitCDRates
+      summary: Submit collected CD (Certificate of Deposit) rates
+      description: >-
+        Store CD rates collected during Steps 1–4. Accepts both standard ($10K) and
+        Jumbo ($100K) CD rates. Call once per tier. Rate and APY values are stored
+        as strings to preserve exact representation (e.g. "0.50", "1.25").
+      tags: [CD Rates]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, tier]
+              properties:
+                sessionId:
+                  type: string
+                  description: Session ID from startCallSession
+                tier:
+                  type: string
+                  enum: [standard_10k, jumbo_100k]
+                  description: Deposit tier — standard ($10K) or Jumbo ($100K)
+                rates:
+                  type: array
+                  description: Array of term rates collected
+                  items:
+                    $ref: '#/components/schemas/TermRate'
+                minimumAbove10k:
+                  type: boolean
+                  description: >-
+                    Set to true if the bank's CD minimum is above $10K (standard tier skipped).
+                  default: false
+                jumboDiffersFromStandard:
+                  type: boolean
+                  description: Whether Jumbo rates differ from standard rates
+                  default: true
+                formula:
+                  type: string
+                  description: >-
+                    Formula used for Jumbo rates if banker gave a formula answer
+                    (e.g., "add 10 basis points to standard"). Leave empty if individual rates given.
+                  example: "add 10 basis points"
+      responses:
+        '200':
+          description: CD rates stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # ─────────────────────────────────────────────
+  # RATE SUBMISSION — MONEY MARKET (Steps 5–6)
+  # ─────────────────────────────────────────────
+  /rates/money-market:
+    post:
+      operationId: submitMoneyMarketRates
+      summary: Submit collected Money Market rates
+      description: >-
+        Store Money Market rates for Steps 5 (Standard MM) and 6 (Relationship/Premium MM).
+        The mmType field distinguishes between standard and relationship products.
+        Call separately for each distinct MM product.
+      tags: [Money Market Rates]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, mmType]
+              properties:
+                sessionId:
+                  type: string
+                mmType:
+                  type: string
+                  enum: [standard, relationship]
+                  description: Standard Money Market or Relationship/Premium Money Market
+                productName:
+                  type: string
+                  description: Product name as stated by banker (required for relationship MM)
+                  example: "Premier Savings"
+                minimumDeposit:
+                  type: number
+                  description: Minimum deposit amount in dollars
+                  example: 2500
+                tiers:
+                  type: array
+                  description: Balance tiers with rate and APY
+                  items:
+                    $ref: '#/components/schemas/BalanceTierRate'
+                relationshipRequirement:
+                  type: string
+                  description: Relationship requirement for premium MM (e.g., "must have checking account")
+                flatRateAllBalances:
+                  type: boolean
+                  description: True if banker stated a single flat rate covers all balance tiers
+                  default: false
+                notOffered:
+                  type: boolean
+                  description: Set true if this MM type is not offered by the bank
+                  default: false
+      responses:
+        '200':
+          description: Money Market rates stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # ─────────────────────────────────────────────
+  # RATE SUBMISSION — IRA (Steps 7–8)
+  # ─────────────────────────────────────────────
+  /rates/ira:
+    post:
+      operationId: submitIRARates
+      summary: Submit collected IRA rates
+      description: >-
+        Store IRA rates for Step 7 (Liquid IRA at $10K) and Step 8 (Fixed IRA / 12-month IRA CD).
+        The iraType field distinguishes between liquid and fixed products.
+      tags: [IRA Rates]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, iraType]
+              properties:
+                sessionId:
+                  type: string
+                iraType:
+                  type: string
+                  enum: [liquid, fixed_12mo]
+                  description: Liquid IRA (IRA Savings / IRA MM) or Fixed 12-month IRA CD
+                depositAmount:
+                  type: number
+                  description: Deposit amount used for rate collection (standard is $10,000)
+                  example: 10000
+                rate:
+                  type: string
+                  description: Interest rate as percentage string
+                  example: "0.50"
+                apy:
+                  type: string
+                  description: Annual Percentage Yield as percentage string
+                  example: "0.50"
+                rateEqualsApy:
+                  type: boolean
+                  description: True if rate and APY are identical for this product
+                notOffered:
+                  type: boolean
+                  description: Set true if this IRA type is not offered
+                  default: false
+      responses:
+        '200':
+          description: IRA rates stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # ─────────────────────────────────────────────
+  # RATE SUBMISSION — SAVINGS (Step 9)
+  # ─────────────────────────────────────────────
+  /rates/savings:
+    post:
+      operationId: submitSavingsRates
+      summary: Submit collected Savings account rates
+      description: >-
+        Store regular savings account rates at $2,500 (Step 9).
+      tags: [Savings Rates]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId]
+              properties:
+                sessionId:
+                  type: string
+                depositAmount:
+                  type: number
+                  description: Deposit amount for rate collection
+                  example: 2500
+                rate:
+                  type: string
+                  description: Interest rate as percentage string
+                  example: "0.25"
+                apy:
+                  type: string
+                  description: APY as percentage string
+                  example: "0.25"
+                rateEqualsApy:
+                  type: boolean
+                  default: false
+                notOffered:
+                  type: boolean
+                  description: Set true if regular savings account is not offered
+                  default: false
+      responses:
+        '200':
+          description: Savings rates stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # ─────────────────────────────────────────────
+  # RATE SUBMISSION — CHECKING (Step 10)
+  # ─────────────────────────────────────────────
+  /rates/checking:
+    post:
+      operationId: submitCheckingRates
+      summary: Submit collected interest-bearing Checking rates
+      description: >-
+        Store interest-bearing checking account rates at $2,500 (Step 10).
+        Only for accounts with no relationship requirements.
+      tags: [Checking Rates]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId]
+              properties:
+                sessionId:
+                  type: string
+                depositAmount:
+                  type: number
+                  example: 2500
+                rate:
+                  type: string
+                  example: "0.01"
+                apy:
+                  type: string
+                  example: "0.01"
+                rateEqualsApy:
+                  type: boolean
+                  default: false
+                notOffered:
+                  type: boolean
+                  description: Set true if interest-bearing checking is not offered
+                  default: false
+      responses:
+        '200':
+          description: Checking rates stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # ─────────────────────────────────────────────
+  # RATE SUBMISSION — SPECIALS (Step 11)
+  # ─────────────────────────────────────────────
+  /rates/specials:
+    post:
+      operationId: submitSpecial
+      summary: Submit a single promotional special rate
+      description: >-
+        Store one promotional or special-rate product (Step 11).
+        Call this endpoint once per special. All 8 required fields must be confirmed
+        before submission. Submit multiple specials with multiple calls.
+      tags: [Specials]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, productType, term, rate, apy, minimumDeposit, iraApplicable]
+              properties:
+                sessionId:
+                  type: string
+                productType:
+                  type: string
+                  description: Product type of the special (e.g. CD, Money Market, Savings)
+                  example: "CD"
+                term:
+                  type: string
+                  description: Term of the special product
+                  example: "7 months"
+                rate:
+                  type: string
+                  description: Interest rate as percentage string
+                  example: "5.00"
+                apy:
+                  type: string
+                  description: APY as percentage string
+                  example: "5.12"
+                minimumDeposit:
+                  type: number
+                  description: Minimum deposit amount required
+                  example: 1000
+                maximumDeposit:
+                  type: number
+                  description: Maximum deposit amount (null if no cap)
+                  example: 250000
+                qualificationRequirements:
+                  type: string
+                  description: Any qualification requirements to obtain this special rate
+                  example: "New money only, must open checking account"
+                iraApplicable:
+                  type: boolean
+                  description: Whether this special rate applies to IRA accounts as well
+      responses:
+        '200':
+          description: Special rate stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # ─────────────────────────────────────────────
+  # CLOSE CALL (Step 12)
+  # ─────────────────────────────────────────────
+  /sessions/{sessionId}/close:
+    post:
+      operationId: closeCallSession
+      summary: Close a completed rate-collection call session
+      description: >-
+        Finalise the call record with the banker's name and completion type.
+        Must be called before invoking the Complete RETURN_TO_CONTROL tool.
+      tags: [Session]
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [completionType, bankerName]
+              properties:
+                completionType:
+                  type: string
+                  enum: [full, spot_check, incomplete, voicemail, email]
+                  description: How the call was completed
+                bankerName:
+                  type: string
+                  description: Name of the banker collected at Step 12
+                  example: "Sarah Johnson"
+      responses:
+        '200':
+          description: Session closed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitSuccess'
+
+  # ─────────────────────────────────────────────
+  # CALLBACKS
+  # ─────────────────────────────────────────────
+  /callbacks:
+    post:
+      operationId: scheduleCallback
+      summary: Schedule a callback when banker is busy
+      description: >-
+        Record a callback request when the banker cannot provide rates now
+        and wants to be contacted at a specific time.
+      tags: [Callbacks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, bankerName, callbackTime]
+              properties:
+                sessionId:
+                  type: string
+                bankerName:
+                  type: string
+                  example: "John Smith"
+                callbackTime:
+                  type: string
+                  description: Requested callback time as stated by banker
+                  example: "Tomorrow morning around 9 AM"
+                phoneNumber:
+                  type: string
+                  description: Phone number to call back (defaults to original dialed number)
+                  example: "+15551234567"
+      responses:
+        '200':
+          description: Callback scheduled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitSuccess'
+
+  # ─────────────────────────────────────────────
+  # DO NOT CALL
+  # ─────────────────────────────────────────────
+  /dnc:
+    post:
+      operationId: markDNC
+      summary: Mark a number as Do Not Call
+      description: >-
+        Record a DNC request ONLY when the banker explicitly says
+        "remove my number", "stop calling", or "do not call".
+        Do NOT use for general refusals.
+      tags: [DNC]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, phoneNumber]
+              properties:
+                sessionId:
+                  type: string
+                phoneNumber:
+                  type: string
+                  description: Phone number to add to DNC list (E.164 format)
+                  example: "+15551234567"
+                bankerName:
+                  type: string
+                  description: Banker name if collected before DNC request
+      responses:
+        '200':
+          description: DNC recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitSuccess'
+
+  # ─────────────────────────────────────────────
+  # MERGER / ACQUISITION
+  # ─────────────────────────────────────────────
+  /merger-acquisition:
+    post:
+      operationId: recordMergerAcquisition
+      summary: Record a bank merger or acquisition event
+      description: >-
+        Record when a banker reports that their bank is in a merger or acquisition.
+        Capture whether it continues as a separate division or full rebrand, and the timeline.
+      tags: [Merger Acquisition]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId]
+              properties:
+                sessionId:
+                  type: string
+                acquiringBank:
+                  type: string
+                  description: Name of the acquiring bank (if known)
+                  example: "Regional Bancorp"
+                continuationStatus:
+                  type: string
+                  enum: [separate_division, full_rebrand, unknown]
+                  description: Whether the bank continues as separate division or full rebrand
+                timeline:
+                  type: string
+                  description: Expected completion date or timeline for the M&A
+                  example: "Q3 2026"
+                bankerName:
+                  type: string
+                additionalNotes:
+                  type: string
+      responses:
+        '200':
+          description: M&A event recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitSuccess'
+
+# ─────────────────────────────────────────────
+# SHARED COMPONENTS
+# ─────────────────────────────────────────────
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+
+  schemas:
+    TermRate:
+      type: object
+      required: [term]
+      properties:
+        term:
+          type: string
+          description: CD term (e.g., "1 month", "3 months", "12 months", "36 months")
+          example: "12 months"
+        rate:
+          type: string
+          description: Interest rate as percentage string (e.g., "1.50")
+          example: "1.50"
+        apy:
+          type: string
+          description: APY as percentage string
+          example: "1.51"
+        rateEqualsApy:
+          type: boolean
+          description: Set true if rate and APY are identical
+          default: false
+
+    BalanceTierRate:
+      type: object
+      required: [tier]
+      properties:
+        tier:
+          type: string
+          description: Balance tier (e.g., "$2,500", "$10,000", "$25,000", "$100,000", "$250,000")
+          example: "$10,000"
+        minBalance:
+          type: number
+          example: 10000
+        maxBalance:
+          type: number
+          description: Upper bound (null if no cap)
+          example: 24999
+        rate:
+          type: string
+          example: "0.75"
+        apy:
+          type: string
+          example: "0.75"
+        rateEqualsApy:
+          type: boolean
+          default: false
+
+    SubmitSuccess:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        sessionId:
+          type: string
+        message:
+          type: string
+          example: "CD rates stored successfully"
+        productType:
+          type: string
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+        details:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Bad request — missing or invalid parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'

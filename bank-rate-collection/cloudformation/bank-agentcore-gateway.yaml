@@ -1,0 +1,419 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Bank Rate Collection — AgentCore Gateway setup.
+  Creates an AgentCore Gateway and a Gateway Target pointing at the
+  Bank Rate Collection API (bank-rate-api.yaml). The AI Agent uses this
+  Gateway to call rate-submission tools via MCP.
+
+# =============================================================================
+# PARAMETERS
+# =============================================================================
+Parameters:
+
+  BankRateApiEndpoint:
+    Type: String
+    Description: >-
+      The Bank Rate Collection API Gateway URL (from bank-rate-api.yaml output ApiEndpoint).
+      Example: https://abc123.execute-api.us-east-1.amazonaws.com/prod
+    AllowedPattern: '^https://[a-zA-Z0-9-]+\.execute-api\.[a-z0-9-]+\.amazonaws\.com/[a-zA-Z0-9-]+'
+    ConstraintDescription: Must be a valid API Gateway URL
+
+  BankRateApiKeyValue:
+    Type: String
+    Description: >-
+      The API key value for the Bank Rate Collection API (from bank-rate-api.yaml output ApiKeyValue).
+    NoEcho: true
+    MinLength: 20
+
+  AgentCoreGatewayDiscoveryUrl:
+    Type: String
+    Description: >-
+      Connect instance discovery URL for identity-based auth.
+      Format: https://{instance-alias}.my.connect.aws/.well-known/openid-configuration
+    AllowedPattern: '^https://[a-zA-Z0-9-]+\.my\.connect\.aws/\.well-known/openid-configuration$'
+
+  OpenApiSpecS3Uri:
+    Type: String
+    Description: >-
+      S3 URI (s3://bucket/key) of the bank-rate-api-openapi.yaml spec file.
+      Upload the spec to the OpenApiBucket output from bank-rate-api.yaml before deploying this stack.
+    Default: ''
+
+  Boto3LayerArn:
+    Type: String
+    Description: Lambda layer ARN with boto3 AgentCore support
+    Default: ''
+    AllowedPattern: '^(arn:aws:lambda:[a-z0-9-]+:[0-9]+:layer:[a-zA-Z0-9-_]+:[0-9]+)?$'
+
+# =============================================================================
+# CONDITIONS
+# =============================================================================
+Conditions:
+  HasBoto3Layer: !Not [!Equals [!Ref Boto3LayerArn, '']]
+  HasOpenApiSpec: !Not [!Equals [!Ref OpenApiSpecS3Uri, '']]
+
+# =============================================================================
+# RESOURCES
+# =============================================================================
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # IAM — Gateway Execution Role
+  # ---------------------------------------------------------------------------
+  GatewayExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: bedrock-agentcore.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Sub '${AWS::AccountId}'
+      Policies:
+        - PolicyName: GatewayPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: '*'
+              - Effect: Allow
+                Action: bedrock-agentcore:InvokeGateway
+                Resource: '*'
+              - Effect: Allow
+                Action: bedrock-agentcore:GetWorkloadAccessToken
+                Resource:
+                  - !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default'
+                  - !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default/workload-identity/*'
+              - Effect: Allow
+                Action: bedrock-agentcore:GetResourceApiKey
+                Resource:
+                  - !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:token-vault/*'
+                  - !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default'
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: '*'
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+
+  # ---------------------------------------------------------------------------
+  # IAM — Custom Resource Lambda Role
+  # ---------------------------------------------------------------------------
+  CustomResourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: AgentCorePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: bedrock-agentcore:*
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:DeleteSecret
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:PutSecretValue
+                  - secretsmanager:UpdateSecret
+                  - secretsmanager:TagResource
+                Resource: '*'
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt GatewayExecutionRole.Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: bedrock-agentcore.amazonaws.com
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: '*'
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+
+  # ---------------------------------------------------------------------------
+  # Custom Resource Lambda — creates Gateway + Target via AgentCore API
+  # ---------------------------------------------------------------------------
+  CustomResourceLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 7
+
+  AgentCoreFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt CustomResourceRole.Arn
+      Timeout: 900
+      MemorySize: 256
+      Layers: !If [HasBoto3Layer, [!Ref Boto3LayerArn], !Ref 'AWS::NoValue']
+      Code:
+        ZipFile: |
+          import json, logging, os, time, hashlib, urllib.request
+          import boto3
+          from botocore.exceptions import ClientError
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def handler(event, context):
+              logger.info(f"Event: {json.dumps(event, default=str)}")
+              rt    = event.get('RequestType')
+              props = event.get('ResourceProperties', {})
+              try:
+                  if   rt == 'Create': res = handle_create(props)
+                  elif rt == 'Update': handle_delete(event); res = handle_create(props)
+                  elif rt == 'Delete': handle_delete(event); res = {}
+                  else: raise ValueError(f"Unknown RequestType: {rt}")
+                  send(event, context, 'SUCCESS', res, res.get('GatewayId', 'NONE'))
+              except Exception as e:
+                  logger.error(f"Error: {e}", exc_info=True)
+                  send(event, context, 'FAILED', {}, 'NONE', str(e))
+
+          def handle_create(props):
+              client   = boto3.client('bedrock-agentcore-control')
+              stack    = props.get('StackName', 'bank-rate')
+              api_key  = props.get('ApiKeyValue', '')
+              disc     = props.get('DiscoveryUrl', '')
+              role     = props.get('RoleArn', '')
+              endpoint = props.get('ApiEndpoint', '')
+              spec_uri = props.get('OpenApiSpecS3Uri', '')
+
+              if not role:
+                  raise ValueError("RoleArn is required")
+
+              # Credential provider
+              h = hashlib.md5(f"{stack}-{api_key[:8]}".encode()).hexdigest()[:8]
+              cp_name = f'{stack}-BankRate-ApiKey-{h}'
+              cp_arn  = get_or_create_cred_provider(client, cp_name, api_key)
+
+              # Gateway
+              gw_hash = hashlib.md5(stack.encode()).hexdigest()[:12]
+              gw_name = f'bank-rate-gw-{gw_hash}'
+              gw      = get_or_create_gateway(client, gw_name, disc, role)
+              wait_ready(client, gw['id'], 'gateway')
+
+              # OpenAPI spec for the target
+              spec = build_inline_spec(endpoint) if not spec_uri else load_spec(spec_uri)
+
+              # Target
+              target_id = create_target(client, gw['id'], 'BankRate-API-Target', spec, cp_arn, endpoint)
+              wait_ready(client, gw['id'], 'target', target_id)
+
+              return {
+                  'GatewayArn':                 gw['arn'],
+                  'GatewayId':                  gw['id'],
+                  'GatewayUrl':                 gw.get('url', ''),
+                  'CredentialProviderArn':       cp_arn,
+                  'BankRateTargetId':            target_id
+              }
+
+          def get_or_create_cred_provider(client, name, key_value):
+              for cp in client.list_api_key_credential_providers().get('credentialProviders', []):
+                  if cp.get('name') == name:
+                      return cp.get('credentialProviderArn') or cp.get('arn', '')
+              resp = client.create_api_key_credential_provider(
+                  name=name, apiKey=key_value
+              )
+              return resp.get('credentialProviderArn') or resp.get('arn', '')
+
+          def get_or_create_gateway(client, name, discovery_url, role_arn):
+              for g in client.list_gateways().get('gateways', []):
+                  if g.get('name') == name:
+                      return {'id': g['gatewayId'], 'arn': g.get('gatewayArn', ''), 'url': g.get('gatewayUrl', '')}
+              resp = client.create_gateway(
+                  name=name,
+                  protocolConfiguration={'gatewayProtocol': 'MCP'},
+                  authorizerConfiguration={
+                      'customJWTAuthorizer': {
+                          'discoveryUrl': discovery_url,
+                          'allowedAudience': []
+                      }
+                  },
+                  roleArn=role_arn
+              )
+              return {'id': resp['gatewayId'], 'arn': resp.get('gatewayArn', ''), 'url': resp.get('gatewayUrl', '')}
+
+          def create_target(client, gw_id, name, spec, cp_arn, endpoint):
+              resp = client.create_gateway_target(
+                  gatewayIdentifier=gw_id,
+                  name=name,
+                  targetConfiguration={
+                      'openApiSchema': {
+                          'inlinePayload': json.dumps(spec) if isinstance(spec, dict) else spec
+                      }
+                  },
+                  credentialProviderConfigurations=[
+                      {
+                          'credentialProviderType': 'GATEWAY_MANAGED',
+                          'gatewayManagedCredentialProviderConfiguration': {
+                              'apiKeyConfig': {'apiKeyIdentifier': cp_arn}
+                          }
+                      }
+                  ]
+              )
+              return resp['targetId']
+
+          def build_inline_spec(endpoint):
+              """Minimal OpenAPI 3.0 placeholder — the real spec is provided via S3."""
+              return {
+                  'openapi': '3.0.1',
+                  'info': {'title': 'Bank Rate Collection API', 'version': '1.0.0'},
+                  'servers': [{'url': endpoint}],
+                  'paths': {
+                      '/sessions': {'post': {'operationId': 'startCallSession', 'summary': 'Start session',
+                          'security': [{'ApiKeyAuth': []}], 'responses': {'200': {'description': 'OK'}}}},
+                      '/rates/cd': {'post': {'operationId': 'submitCDRates', 'summary': 'Submit CD rates',
+                          'security': [{'ApiKeyAuth': []}], 'responses': {'200': {'description': 'OK'}}}},
+                      '/rates/money-market': {'post': {'operationId': 'submitMoneyMarketRates', 'summary': 'Submit MM rates',
+                          'security': [{'ApiKeyAuth': []}], 'responses': {'200': {'description': 'OK'}}}},
+                      '/rates/ira': {'post': {'operationId': 'submitIRARates', 'summary': 'Submit IRA rates',
+                          'security': [{'ApiKeyAuth': []}], 'responses': {'200': {'description': 'OK'}}}},
+                      '/rates/savings': {'post': {'operationId': 'submitSavingsRates', 'summary': 'Submit savings rates',
+                          'security': [{'ApiKeyAuth': []}], 'responses': {'200': {'description': 'OK'}}}},
+                      '/rates/checking': {'post': {'operationId': 'submitCheckingRates', 'summary': 'Submit checking rates',
+                          'security': [{'ApiKeyAuth': []}], 'responses': {'200': {'description': 'OK'}}}},
+                      '/rates/specials': {'post': {'operationId': 'submitSpecial', 'summary': 'Submit special',
+                          'security': [{'ApiKeyAuth': []}], 'responses': {'200': {'description': 'OK'}}}},
+                      '/callbacks': {'post': {'operationId': 'scheduleCallback', 'summary': 'Schedule callback',
+                          'security': [{'ApiKeyAuth': []}], 'responses': {'200': {'description': 'OK'}}}},
+                      '/dnc': {'post': {'operationId': 'markDNC', 'summary': 'Mark DNC',
+                          'security': [{'ApiKeyAuth': []}], 'responses': {'200': {'description': 'OK'}}}},
+                      '/merger-acquisition': {'post': {'operationId': 'recordMergerAcquisition', 'summary': 'Record M&A',
+                          'security': [{'ApiKeyAuth': []}], 'responses': {'200': {'description': 'OK'}}}}
+                  },
+                  'components': {
+                      'securitySchemes': {'ApiKeyAuth': {'type': 'apiKey', 'in': 'header', 'name': 'x-api-key'}}
+                  }
+              }
+
+          def load_spec(s3_uri):
+              """Load OpenAPI spec from S3."""
+              import boto3, yaml
+              parts = s3_uri[5:].split('/', 1)
+              s3    = boto3.client('s3')
+              resp  = s3.get_object(Bucket=parts[0], Key=parts[1])
+              content = resp['Body'].read().decode('utf-8')
+              try:
+                  import yaml as _yaml
+                  return _yaml.safe_load(content)
+              except Exception:
+                  return json.loads(content)
+
+          def wait_ready(client, gw_id, res_type, target_id=None):
+              for _ in range(30):
+                  try:
+                      if res_type == 'gateway':
+                          r = client.get_gateway(gatewayIdentifier=gw_id)
+                          if r.get('status') == 'READY': return True
+                      else:
+                          r = client.get_gateway_target(gatewayIdentifier=gw_id, targetId=target_id)
+                          if r.get('status') == 'READY': return True
+                  except Exception as e:
+                      logger.warning(f"Status check error: {e}")
+                  time.sleep(2)
+              return False
+
+          def handle_delete(event):
+              client = boto3.client('bedrock-agentcore-control')
+              gw_id  = event.get('PhysicalResourceId', 'NONE')
+              if not gw_id or gw_id == 'NONE': return
+              try:
+                  for t in client.list_gateway_targets(gatewayIdentifier=gw_id).get('targets', []):
+                      try: client.delete_gateway_target(gatewayIdentifier=gw_id, targetId=t['targetId'])
+                      except: pass
+                  client.delete_gateway(gatewayIdentifier=gw_id)
+              except Exception as e:
+                  logger.warning(f"Delete error (may be ok): {e}")
+
+          def send(event, context, status, data, phys_id='NONE', reason=None):
+              body = {
+                  'Status': status,
+                  'Reason': reason or f"See CloudWatch: {context.log_stream_name}",
+                  'PhysicalResourceId': phys_id,
+                  'StackId':  event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Data': data
+              }
+              b = json.dumps(body).encode('utf-8')
+              req = urllib.request.Request(
+                  event['ResponseURL'], data=b,
+                  headers={'Content-Type': '', 'Content-Length': len(b)},
+                  method='PUT'
+              )
+              urllib.request.urlopen(req, timeout=30)
+      Tags:
+        - {Key: Environment, Value: NonProd}
+        - {Key: Name,        Value: BankRateCollection}
+        - {Key: contact,     Value: askdevopscloud@spglobal.com}
+        - {Key: AppID,       Value: ASP0017650}
+        - {Key: CreatedBy,   Value: Abhay.Lunkad}
+        - {Key: Owner,       Value: anuthama.c@spglobal.com}
+
+  # ---------------------------------------------------------------------------
+  # Custom Resource Invocation — creates the Gateway + Target
+  # ---------------------------------------------------------------------------
+  BankRateGateway:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:    !GetAtt AgentCoreFn.Arn
+      StackName:       !Ref 'AWS::StackName'
+      ApiKeyValue:     !Ref BankRateApiKeyValue
+      DiscoveryUrl:    !Ref AgentCoreGatewayDiscoveryUrl
+      RoleArn:         !GetAtt GatewayExecutionRole.Arn
+      ApiEndpoint:     !Ref BankRateApiEndpoint
+      OpenApiSpecS3Uri: !Ref OpenApiSpecS3Uri
+
+# =============================================================================
+# OUTPUTS
+# =============================================================================
+Outputs:
+
+  GatewayArn:
+    Description: ARN of the AgentCore Gateway for the Bank Rate Collection API
+    Value: !GetAtt BankRateGateway.GatewayArn
+    Export:
+      Name: !Sub '${AWS::StackName}-GatewayArn'
+
+  GatewayId:
+    Description: ID of the AgentCore Gateway
+    Value: !GetAtt BankRateGateway.GatewayId
+    Export:
+      Name: !Sub '${AWS::StackName}-GatewayId'
+
+  GatewayUrl:
+    Description: Endpoint URL of the AgentCore Gateway
+    Value: !GetAtt BankRateGateway.GatewayUrl
+    Export:
+      Name: !Sub '${AWS::StackName}-GatewayUrl'
+
+  BankRateTargetId:
+    Description: AgentCore Gateway Target ID for the Bank Rate API
+    Value: !GetAtt BankRateGateway.BankRateTargetId
+    Export:
+      Name: !Sub '${AWS::StackName}-BankRateTargetId'

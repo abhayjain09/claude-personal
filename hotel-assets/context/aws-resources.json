@@ -1,0 +1,73 @@
+{
+  "captured_at": "2026-05-11T14:13:17.120472",
+  "account_id": "610639371721",
+  "region": "us-east-1",
+  "lex_bot": {
+    "bot_id": "YBI14PGD3E",
+    "name": "hotel-SelfServiceBot",
+    "alias_id": "TSTALIASID",
+    "alias_name": "TestBotAlias",
+    "bot_version": "DRAFT",
+    "speech_model": "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-2-sonic-v1:0",
+    "locale_status": "Built",
+    "nlu_confidence_threshold": 0.4,
+    "intents": {
+      "AmazonQinConnect": {
+        "id": "1SCC6HWXUT",
+        "fulfillmentCodeHook_enabled": false,
+        "fulfillmentUpdates_active": true,
+        "startResponse_delay_seconds": 1,
+        "startResponse_message": "Sure, one moment please.",
+        "initialResponseSetting": null,
+        "note": "fulfillmentCodeHook.enabled=False blocks startResponse filler from firing"
+      },
+      "FallbackIntent": {
+        "id": "FALLBCKINT",
+        "initialResponse_message": "Got it! Let me look into that for you."
+      }
+    }
+  },
+  "ai_agent": {
+    "id": "5b8b33fd-f5f3-4b01-a5bb-7ae9dc69e7c2",
+    "name": "Hotel-Self-Service-Agent",
+    "type": "ORCHESTRATION",
+    "assistant_id": "d97929ca-a9c3-43ee-8562-c9272acb45e6",
+    "prompt_id": "6edfa19f-ebcb-4068-b077-87352e02bf31:7",
+    "tools": [
+      "Retrieve",
+      "cdf2_2fdf_405c_975b_257714c06fc6",
+      "Hotel_API_Target___cancelReservation",
+      "Hotel_API_Target___createBooking",
+      "Hotel_API_Target___searchHotels",
+      "Hotel_API_Target___modifyReservation",
+      "Hotel_API_Target___getCustomerReservations",
+      "Escalate",
+      "Complete"
+    ]
+  },
+  "ai_prompt": {
+    "id": "6edfa19f-ebcb-4068-b077-87352e02bf31",
+    "name": "Hotel-Self-Service-Prompt",
+    "version": "3",
+    "model_id": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "api_format": "MESSAGES",
+    "type": "ORCHESTRATION"
+  },
+  "connect_instance": {
+    "id": "6f93dfc3-9503-4b86-971b-f608ec484e78",
+    "alias": "amazon-connect-610639371721-0e9e2ddb4515"
+  },
+  "contact_flow": {
+    "id": "758b182f-afad-4321-acbe-9d8a178c9ae2",
+    "name": "Self Service Test Flow",
+    "state": "ACTIVE",
+    "greeting_text": "Hi my name is Abhay from S&P global how may I help you?",
+    "lex_session_attrs": {
+      "x-amz-lex:audio:end-timeout-ms:*:*": "400",
+      "x-amz-lex:audio:start-timeout-ms:*:*": "500",
+      "x-amz-lex:audio:max-length-ms:*:*": "30000",
+      "x-amz-lex:allow-interrupt:*:*": "true",
+      "x-amz-lex:q-in-connect:ai-agent-arn": "arn:aws:wisdom:us-east-1:610639371721:ai-agent/d97929ca-a9c3-43ee-8562-c9272acb45e6/5b8b33fd-f5f3-4b01-a5bb-7ae9dc69e7c2:$LATEST"
+    }
+  }
+}
