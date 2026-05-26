@@ -327,7 +327,16 @@ Resources:
                   'toolName': 'Retrieve',
                   'toolType': 'MODEL_CONTEXT_PROTOCOL',
                   'toolId': 'aws_service__qconnect_Retrieve',
-                  'instruction': {'instruction': 'Search the knowledge base for bank rate collection information.'},
+                  'instruction': {
+                      'instruction': (
+                          'Search the knowledge base for bank rate collection FAQs, '
+                          'product definitions, S&P Global Ratewatch policies, or guidance on '
+                          'handling unusual banker responses. Use this BEFORE escalating if '
+                          'the banker asks a procedural question you are unsure about. '
+                          'ALWAYS emit an instant ack <message> and a bridging <message> '
+                          'like "Let me look that up for you" BEFORE invoking this tool.'
+                      )
+                  },
                   'overrideInputValues': [
                       {
                           'jsonPath': '$.retrievalConfiguration.knowledgeSource.assistantAssociationIds',
@@ -345,12 +354,28 @@ Resources:
               escalate_tool = {
                   'toolName': 'Escalate',
                   'toolType': 'RETURN_TO_CONTROL',
-                  'description': 'Transfer to human agent when banker issue cannot be resolved by AI',
-                  'instruction': {'instruction': 'Escalate when you cannot adequately assist the banker.'},
+                  'description': 'Transfer to human agent when banker issue cannot be resolved by Ryan',
+                  'instruction': {
+                      'instruction': (
+                          'Escalate when: (a) a tool call returns an error, (b) the banker '
+                          'repeatedly asks for a human after a gentle confirmation, '
+                          '(c) the banker is significantly frustrated after multiple attempts, '
+                          '(d) the request is outside Ryan\'s rate-collection scope. '
+                          'Always emit a brief reassuring <message> first explaining you are '
+                          'connecting them with a specialist, THEN invoke Escalate. Do not '
+                          'output anything after invoking Escalate.'
+                      )
+                  },
                   'inputSchema': {
                       'type': 'object',
                       'properties': {
-                          'reason': {'type': 'string', 'description': 'Reason for escalation'}
+                          'reason':       {'type': 'string', 'description': 'Reason for escalation'},
+                          'bankerIntent': {'type': 'string', 'description': 'What the banker was trying to do'},
+                          'sentiment':    {
+                              'type': 'string',
+                              'enum': ['positive', 'neutral', 'frustrated'],
+                              'description': 'Banker emotional state at time of escalation'
+                          }
                       },
                       'required': ['reason']
                   },
@@ -362,7 +387,16 @@ Resources:
                   'toolName': 'Complete',
                   'toolType': 'RETURN_TO_CONTROL',
                   'description': 'End the call after all rate collection steps are done and banker has said goodbye',
-                  'instruction': {'instruction': 'Mark call complete ONLY after banker goodbye and closeCallSession has been called.'},
+                  'instruction': {
+                      'instruction': (
+                          'Invoke ONLY when ALL of these are true: '
+                          '(1) all applicable rate steps 1-11 are complete, '
+                          '(2) closeCallSession API has been called, '
+                          '(3) banker name has been collected, '
+                          '(4) banker has said goodbye or acknowledged the end of the call. '
+                          'Do NOT output anything after invoking Complete — the call ends here.'
+                      )
+                  },
                   'inputSchema': {
                       'type': 'object',
                       'properties': {
@@ -382,28 +416,68 @@ Resources:
               }
 
               # Bank Rate API tools via AgentCore Gateway
+              # Per-tool instructions explicitly remind the model to use the two-message
+              # pre-tool latency pattern with a tool-specific bridging filler.
+              api_ops = {
+                  'startCallSession': (
+                      'Create a new call session record. Call this SILENTLY as the very first '
+                      'action when the call connects, before any spoken output. Pass bankName '
+                      'and phoneNumber from contact attributes. Store the returned sessionId for all subsequent calls.'
+                  ),
+                  'getCallSession': (
+                      'Retrieve current call session state. Useful for resuming after a long '
+                      'interruption. Pre-tool bridging filler example: "Let me check where we left off."'
+                  ),
+                  'closeCallSession': (
+                      'Finalise the session with completionType and bankerName. MUST be called '
+                      'BEFORE Complete. Pre-tool bridging filler example: "Let me wrap up my notes."'
+                  ),
+                  'submitCDRates': (
+                      'Store CD rate data after Step 3 (standard_10k tier) or Step 4 (jumbo_100k tier). '
+                      'Pre-tool bridging filler example: "Let me log those CD rates now."'
+                  ),
+                  'submitMoneyMarketRates': (
+                      'Store Money Market rate data after Step 5 (mmType=standard) or Step 6 (mmType=relationship). '
+                      'Pre-tool bridging filler example: "Let me record those Money Market rates."'
+                  ),
+                  'submitIRARates': (
+                      'Store IRA rate data after Step 7 (iraType=liquid) or Step 8 (iraType=fixed_12mo). '
+                      'Pre-tool bridging filler example: "Let me note that IRA rate."'
+                  ),
+                  'submitSavingsRates': (
+                      'Store regular savings rate data after Step 9. '
+                      'Pre-tool bridging filler example: "Let me save that savings rate."'
+                  ),
+                  'submitCheckingRates': (
+                      'Store interest-bearing checking rate data after Step 10. '
+                      'Pre-tool bridging filler example: "Let me save that checking rate."'
+                  ),
+                  'submitSpecial': (
+                      'Store ONE promotional special rate record after all 8 fields are confirmed in Step 11. '
+                      'Call once per special. Pre-tool bridging filler example: "Let me write that special down."'
+                  ),
+                  'scheduleCallback': (
+                      'Record a callback request when the banker is unavailable. '
+                      'Pre-tool bridging filler example: "Let me get that callback on the books."'
+                  ),
+                  'markDNC': (
+                      'Add a phone number to the Do Not Call registry. Use ONLY for explicit DNC requests '
+                      '("remove my number", "stop calling", "do not call"). Refusals are NOT DNC. '
+                      'Pre-tool bridging filler example: "Let me take care of that right away."'
+                  ),
+                  'recordMergerAcquisition': (
+                      'Record a bank merger or acquisition event when the banker reports one. '
+                      'Pre-tool bridging filler example: "Let me note the merger details."'
+                  ),
+              }
               bank_api_tools = []
               if gateway_arn:
-                  api_ops = [
-                      'startCallSession',
-                      'getCallSession',
-                      'closeCallSession',
-                      'submitCDRates',
-                      'submitMoneyMarketRates',
-                      'submitIRARates',
-                      'submitSavingsRates',
-                      'submitCheckingRates',
-                      'submitSpecial',
-                      'scheduleCallback',
-                      'markDNC',
-                      'recordMergerAcquisition',
-                  ]
-                  for op in api_ops:
+                  for op, instr in api_ops.items():
                       bank_api_tools.append({
                           'toolName': f'BankRate_API___{op}',
                           'toolType': 'MODEL_CONTEXT_PROTOCOL',
-                          'toolId': f'{gateway_arn}',
-                          'instruction': {'instruction': f'Call the Bank Rate Collection API operation: {op}'},
+                          'toolId':   gateway_arn,
+                          'instruction': {'instruction': instr},
                           'userInteractionConfiguration': {'isUserConfirmationRequired': False}
                       })
 
@@ -422,7 +496,9 @@ Resources:
                               'associationConfigurationData': {
                                   'knowledgeBaseAssociationConfigurationData': {
                                       'contentTagFilter': None,
-                                      'maxResults': 5,
+                                      # Fewer results → faster Retrieve tool latency. 3 is enough
+                                      # for Ryan's FAQ-style lookups and saves ~200ms on average.
+                                      'maxResults': 3,
                                       'overrideKnowledgeBaseSearchType': 'SEMANTIC'
                                   }
                               }

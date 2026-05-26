@@ -4,6 +4,42 @@ This document lists all tools used by the **Bank-Rate-Collection AI Agent (Ryan)
 
 ---
 
+## Two-Message Pre-Tool Latency Pattern
+
+Amazon Nova Sonic streams audio token-by-token. Tool calls take 1–3 seconds — if Ryan goes silent during that window, the banker thinks the line dropped.
+
+For **every** tool call (except the silent `startCallSession` at call connect), Ryan must emit:
+
+1. An **instant ack** `<message>` (3–6 words) — streams in <1s.
+2. A silent `<thinking>` block to pick the tool.
+3. A **bridging** `<message>` — tool-specific, describes the action.
+4. The tool call.
+5. A result `<message>`.
+
+This is enforced in the prompt and reinforced in every tool's `instruction` text.
+
+### Per-tool bridging filler reference
+
+| Tool                      | Instant ack example      | Bridging filler example                       |
+|---------------------------|--------------------------|-----------------------------------------------|
+| `startCallSession`        | (silent — pre-greeting)  | (silent — pre-greeting)                       |
+| `getCallSession`          | "One sec."               | "Let me check where we left off."             |
+| `closeCallSession`        | "Got it, thanks."        | "Let me wrap up my notes."                    |
+| `submitCDRates`           | "Got it."                | "Let me log those CD rates now."              |
+| `submitMoneyMarketRates`  | "Perfect."               | "Let me record those Money Market rates."     |
+| `submitIRARates`          | "Noted."                 | "Let me note that IRA rate."                  |
+| `submitSavingsRates`      | "Alright."               | "Let me save that savings rate."              |
+| `submitCheckingRates`     | "Sure."                  | "Let me save that checking rate."             |
+| `submitSpecial`           | "Appreciate that."       | "Let me write that special down."             |
+| `scheduleCallback`        | "Of course."             | "Let me get that callback on the books."      |
+| `markDNC`                 | "Understood, apologies." | "Let me take care of that right away."        |
+| `recordMergerAcquisition` | "Thanks for letting me know." | "Let me note the merger details."        |
+| `Retrieve`                | "Hmm, let me see."       | "Let me look that up for you."                |
+| `Escalate`                | (none — speak final line first) | "I'm connecting you with a specialist now." |
+| `Complete`                | (none — banker has said goodbye) | (no output after Complete)              |
+
+---
+
 ## RETURN_TO_CONTROL Tools
 
 ### Complete

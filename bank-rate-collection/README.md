@@ -169,18 +169,54 @@ In the Amazon Connect contact flow, set the Lex bot session attribute:
 x-amz-lex:q-in-connect:ai-agent-arn = <AIAgentArn from stack output>
 ```
 
-Also set:
+Set the voice to **Amazon Nova Sonic** (speech-to-speech) on the SetVoice block:
 ```
-x-amz-lex:audio:end-timeout-ms:*:*   = 400
-x-amz-lex:audio:start-timeout-ms:*:* = 500
-x-amz-lex:audio:max-length-ms:*:*    = 30000
-x-amz-lex:allow-interrupt:*:*        = true
+Voice engine = Generative
+Voice ID     = amazon.nova-2-sonic-v1:0   (or Matthew for fallback Generative TTS)
+Language     = en-US
 ```
 
-Set the contact flow greeting (in Create Wisdom Session block):
+Latency-tuned Lex session attributes (set on ConnectParticipantWithLexBot block):
+```
+x-amz-lex:audio:end-timeout-ms:*:*   = 400      # shorter end-of-speech detection
+x-amz-lex:audio:start-timeout-ms:*:* = 500      # let banker breathe before barge-in
+x-amz-lex:audio:max-length-ms:*:*    = 30000
+x-amz-lex:allow-interrupt:*:*        = true     # banker can talk over Ryan
+```
+
+Set the contact flow greeting (in the Create Wisdom Session block — first thing the banker hears):
 ```
 Hi, this is Ryan calling from S&P Global Ratewatch. May I speak with someone about your current deposit rates?
 ```
+
+---
+
+## Voice Latency Design
+
+This solution is tuned for low perceived latency on Amazon Nova Sonic (speech-to-speech). End-to-end the realistic minimum is ~1.2–3.5s per turn (Nova Sonic ASR + Claude Haiku inference + tool call + Nova Sonic TTS).
+
+To prevent the banker from hearing silence during tool calls, the Ryan prompt enforces a **two-message pre-tool pattern**:
+
+1. **Instant ack** — `<message>Got it.</message>` streams in <1s while Ryan thinks.
+2. **Bridging filler** — `<message>Let me log those CD rates now.</message>` streams while the tool runs.
+3. **Tool call** — actual API hit takes 0.5–2s, but is now masked by the bridging audio.
+4. **Result** — `<message>Perfect. And for jumbo CDs?</message>` continues the flow.
+
+Each tool has its own bridging phrase. See `ai-agents/bank/bank-rate-collection-tool-configs.md` for the full mapping.
+
+Additional latency wins applied:
+- Claude Haiku 4.5 (fastest first-token Anthropic model on Bedrock).
+- Knowledge Base `maxResults` lowered to 3 (vs hotel default of 5) — ~200ms saved per Retrieve.
+- Lex `end-timeout-ms` set to 400ms (faster end-of-speech detection).
+- Single Lambda fronts all 12 API operations (warm container reuse across calls).
+- Per-tool instructions in the AI Agent config explicitly remind the LLM to emit the bridging filler before each call.
+
+What we deliberately did NOT do (and why):
+- **Lex `fulfillmentUpdates` filler** — architecturally blocked for AMAZON.QInConnectIntent (returns ValidationException). Prompt-side filler is the only working path.
+- **Lex `initialResponseSetting`** — rejected by Lex build validation for QInConnectIntent.
+- **Connect flow per-turn filler** — `ConnectParticipantWithLexBot` does not expose a mid-turn hook.
+
+See `hotel-assets/context/latency-diagnosis.txt` for the full investigation of why these don't work.
 
 ---
 
