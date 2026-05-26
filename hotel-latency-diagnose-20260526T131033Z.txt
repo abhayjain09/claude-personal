@@ -1,0 +1,496 @@
+
+================================================================================
+  DIAGNOSTIC RUN — 20260526T131033Z
+================================================================================
+Region:               us-east-1
+AssistantId:          d97929ca-a9c3-43ee-8562-c9272acb45e6
+AIAgentId:            5b8b33fd-f5f3-4b01-a5bb-7ae9dc69e7c2
+AIPromptId:           6edfa19f-ebcb-4068-b077-87352e02bf31
+ConnectInstanceId:    6f93dfc3-9503-4b86-971b-f608ec484e78
+Bedrock log group:    /aws/bedrock/modelinvocations
+Looking back:         24h (since epoch-ms 1779714633000)
+
+AWS identity:
+
+--- CMD: aws sts get-caller-identity --region us-east-1 ---
+{
+    "UserId": "AROAY4LHRLXE2PLEG667L:abhay.lunkad@spglobal.com",
+    "Account": "610639371721",
+    "Arn": "arn:aws:sts::610639371721:assumed-role/ADFS-MHF-SystemAdministrator/abhay.lunkad@spglobal.com"
+}
+
+================================================================================
+  1. AI PROMPT CONFIG (deployed Hotel-Self-Service-Prompt)
+================================================================================
+Looking for cache markers, full template text, model id, and prompt size.
+
+--- CMD: aws qconnect get-ai-prompt --assistant-id d97929ca-a9c3-43ee-8562-c9272acb45e6 --ai-prompt-id 6edfa19f-ebcb-4068-b077-87352e02bf31 --region us-east-1 --output json ---
+
+An error occurred (ResourceNotFoundException) when calling the GetAIPrompt operation: Assistant does not exist.
+(command exited 254)
+
+--- AI Prompt versions (which version is the agent pinned to?) ---
+
+--- CMD: aws qconnect list-ai-prompt-versions --assistant-id d97929ca-a9c3-43ee-8562-c9272acb45e6 --ai-prompt-id 6edfa19f-ebcb-4068-b077-87352e02bf31 --region us-east-1 --output json ---
+
+An error occurred (ResourceNotFoundException) when calling the ListAIPromptVersions operation: Assistant does not exist.
+(command exited 254)
+
+================================================================================
+  2. AI AGENT CONFIG (tool list, KB association, orchestration template)
+================================================================================
+This dumps the full tool inventory and KB association configuration.
+
+--- CMD: aws qconnect get-ai-agent --assistant-id d97929ca-a9c3-43ee-8562-c9272acb45e6 --ai-agent-id 5b8b33fd-f5f3-4b01-a5bb-7ae9dc69e7c2 --region us-east-1 --output json ---
+
+An error occurred (ResourceNotFoundException) when calling the GetAIAgent operation: Assistant does not exist.
+(command exited 254)
+
+--- AI Agent versions ---
+
+--- CMD: aws qconnect list-ai-agent-versions --assistant-id d97929ca-a9c3-43ee-8562-c9272acb45e6 --ai-agent-id 5b8b33fd-f5f3-4b01-a5bb-7ae9dc69e7c2 --region us-east-1 --output json ---
+
+An error occurred (ResourceNotFoundException) when calling the ListAIAgentVersions operation: Assistant does not exist.
+(command exited 254)
+
+================================================================================
+  3. ASSISTANT CONFIG
+================================================================================
+
+--- CMD: aws qconnect get-assistant --assistant-id d97929ca-a9c3-43ee-8562-c9272acb45e6 --region us-east-1 --output json ---
+
+An error occurred (ResourceNotFoundException) when calling the GetAssistant operation: Assistant does not exist.
+(command exited 254)
+
+--- All AI Agents under this assistant (to spot extra/unused agents) ---
+
+--- CMD: aws qconnect list-ai-agents --assistant-id d97929ca-a9c3-43ee-8562-c9272acb45e6 --region us-east-1 --output json ---
+
+An error occurred (ResourceNotFoundException) when calling the ListAIAgents operation: Assistant does not exist.
+(command exited 254)
+
+--- All AI Prompts under this assistant ---
+
+--- CMD: aws qconnect list-ai-prompts --assistant-id d97929ca-a9c3-43ee-8562-c9272acb45e6 --region us-east-1 --output json ---
+
+An error occurred (ResourceNotFoundException) when calling the ListAIPrompts operation: Assistant does not exist.
+(command exited 254)
+
+================================================================================
+  4. CONNECT INSTANCE ATTRIBUTES
+================================================================================
+
+--- CMD: aws connect describe-instance --instance-id 6f93dfc3-9503-4b86-971b-f608ec484e78 --region us-east-1 --output json ---
+{
+    "Instance": {
+        "Id": "6f93dfc3-9503-4b86-971b-f608ec484e78",
+        "Arn": "arn:aws:connect:us-east-1:610639371721:instance/6f93dfc3-9503-4b86-971b-f608ec484e78",
+        "IdentityManagementType": "CONNECT_MANAGED",
+        "InstanceAlias": "amazon-connect-610639371721-0e9e2ddb4515",
+        "CreatedTime": "2026-05-04T15:35:08+05:30",
+        "ServiceRole": "arn:aws:iam::610639371721:role/aws-service-role/connect.amazonaws.com/AWSServiceRoleForAmazonConnect_EIHvMaBr9quOHzHv4DQk",
+        "InstanceStatus": "ACTIVE",
+        "InboundCallsEnabled": true,
+        "OutboundCallsEnabled": true,
+        "InstanceAccessUrl": "https://amazon-connect-610639371721-0e9e2ddb4515.my.connect.aws",
+        "Tags": {
+            "Owner": "anuthama.c@spglobal.com",
+            "CreatedBy": "Abhay.Lunkad",
+            "AppID": "ASP0017650",
+            "contact": "askdevopscloud@spglobal.com",
+            "Environment": "NonProd",
+            "Purpose": "Amazon Connect Instance",
+            "Name": "NovaVoice"
+        }
+    }
+}
+
+--- Instance integrations (Wisdom, Lex, Lambda associations) ---
+
+--- CMD: aws connect list-integration-associations --instance-id 6f93dfc3-9503-4b86-971b-f608ec484e78 --region us-east-1 --output json ---
+{
+    "IntegrationAssociationSummaryList": [
+        {
+            "IntegrationAssociationId": "03879586-5d06-4013-b0bd-28bdc232564c",
+            "IntegrationAssociationArn": "arn:aws:connect:us-east-1:610639371721:instance/6f93dfc3-9503-4b86-971b-f608ec484e78/integration-association/03879586-5d06-4013-b0bd-28bdc232564c",
+            "InstanceId": "6f93dfc3-9503-4b86-971b-f608ec484e78",
+            "IntegrationType": "APPLICATION",
+            "IntegrationArn": "arn:aws:app-integrations:us-east-1:610639371721:application/872ce257-a69b-412e-aae8-166b8884ca02"
+        },
+        {
+            "IntegrationAssociationId": "98544ba9-dc3e-4185-8ba1-0b5c12031c80",
+            "IntegrationAssociationArn": "arn:aws:connect:us-east-1:610639371721:instance/6f93dfc3-9503-4b86-971b-f608ec484e78/integration-association/98544ba9-dc3e-4185-8ba1-0b5c12031c80",
+            "InstanceId": "6f93dfc3-9503-4b86-971b-f608ec484e78",
+            "IntegrationType": "WISDOM_ASSISTANT",
+            "IntegrationArn": "arn:aws:wisdom:us-east-1:610639371721:assistant/5db15146-7756-48d1-8eaf-723e39fb6da2"
+        },
+        {
+            "IntegrationAssociationId": "6e6f1334-4d14-4fb2-a012-c67b1a427381",
+            "IntegrationAssociationArn": "arn:aws:connect:us-east-1:610639371721:instance/6f93dfc3-9503-4b86-971b-f608ec484e78/integration-association/6e6f1334-4d14-4fb2-a012-c67b1a427381",
+            "InstanceId": "6f93dfc3-9503-4b86-971b-f608ec484e78",
+            "IntegrationType": "WISDOM_KNOWLEDGE_BASE",
+            "IntegrationArn": "arn:aws:wisdom:us-east-1:610639371721:knowledge-base/17c230f3-15ea-4f5a-a270-4947203dd6db"
+        }
+    ]
+}
+
+================================================================================
+  5. BEDROCK MODEL INVOCATION LOGS
+================================================================================
+Critical: this section answers 'is prompt caching working?'
+Look for: cache_read_input_tokens, cache_creation_input_tokens, input_tokens
+
+--- Does the log group exist? ---
+
+--- CMD: aws logs describe-log-groups --log-group-name-prefix /aws/bedrock/modelinvocations --region us-east-1 --output json ---
+{
+    "logGroups": []
+}
+
+--- Most recent 20 invocations (raw) ---
+
+--- CMD: aws logs filter-log-events --log-group-name /aws/bedrock/modelinvocations --start-time 1779714633000 --max-items 20 --region us-east-1 --output json ---
+
+An error occurred (ResourceNotFoundException) when calling the FilterLogEvents operation: The specified log group does not exist.
+(command exited 254)
+
+--- Filter: invocations that DID hit the cache (cache_read_input_tokens > 0) ---
+
+--- CMD: aws logs filter-log-events --log-group-name /aws/bedrock/modelinvocations --start-time 1779714633000 --filter-pattern { $.output.outputBodyJson.usage.cache_read_input_tokens > 0 } --max-items 10 --region us-east-1 --output json ---
+
+An error occurred (ResourceNotFoundException) when calling the FilterLogEvents operation: The specified log group does not exist.
+(command exited 254)
+
+--- Filter: invocations that CREATED cache entries (cache_creation_input_tokens > 0) ---
+
+--- CMD: aws logs filter-log-events --log-group-name /aws/bedrock/modelinvocations --start-time 1779714633000 --filter-pattern { $.output.outputBodyJson.usage.cache_creation_input_tokens > 0 } --max-items 10 --region us-east-1 --output json ---
+
+An error occurred (ResourceNotFoundException) when calling the FilterLogEvents operation: The specified log group does not exist.
+(command exited 254)
+
+--- Token usage distribution across recent invocations ---
+(input_tokens, output_tokens, cache_read, cache_create — pulled via CloudWatch Insights)
+
+--- CMD: aws logs start-query --log-group-name /aws/bedrock/modelinvocations --start-time 1779714633 --end-time 1779801060 --query-string fields @timestamp, output.outputBodyJson.usage.input_tokens, output.outputBodyJson.usage.output_tokens, output.outputBodyJson.usage.cache_read_input_tokens, output.outputBodyJson.usage.cache_creation_input_tokens | sort @timestamp desc | limit 50 --region us-east-1 ---
+
+An error occurred (ResourceNotFoundException) when calling the StartQuery operation: Log group '/aws/bedrock/modelinvocations' does not exist for account ID '610639371721' (Service: AWSLogs; Status Code: 400; Error Code: ResourceNotFoundException; Request ID: 405cbe0f-efff-4fad-bc12-c6485a96e386; Proxy: null)
+(command exited 254)
+(Note: Insights query started. Run 'aws logs get-query-results --query-id <id>' separately if needed.)
+
+================================================================================
+  6. LEX BOT CONFIG (Nova Sonic + AmazonQinConnect intent)
+================================================================================
+--- List Lex bots ---
+
+--- CMD: aws lexv2-models list-bots --region us-east-1 --output json ---
+{
+    "botSummaries": [
+        {
+            "botId": "YBI14PGD3E",
+            "botName": "hotel-SelfServiceBot",
+            "description": "",
+            "botStatus": "Available",
+            "lastUpdatedDateTime": "2026-05-05T16:26:11.757000+05:30",
+            "botType": "Bot"
+        }
+    ]
+}
+
+================================================================================
+  7. HOTEL API LAMBDA — recent latency
+================================================================================
+--- Hotel API Lambdas ---
+
+--- CMD: aws lambda list-functions --region us-east-1 --query Functions[?contains(FunctionName, `hotel`) || contains(FunctionName, `Hotel`)].{Name:FunctionName,Runtime:Runtime,Mem:MemorySize,Timeout:Timeout,LastMod:LastModified} --output json ---
+[
+    {
+        "Name": "ai-agent-workshop-HotelApiStack-KH4YY0DI3-GetResFn-mfKpsO8DF7Ib",
+        "Runtime": "python3.13",
+        "Mem": 128,
+        "Timeout": 3,
+        "LastMod": "2026-05-04T10:05:25.118+0000"
+    },
+    {
+        "Name": "ai-agent-workshop-HotelApiStack-KH4YY0D-S3UploadFn-tATGKAJpJGSW",
+        "Runtime": "python3.13",
+        "Mem": 512,
+        "Timeout": 60,
+        "LastMod": "2026-05-04T10:05:14.407+0000"
+    },
+    {
+        "Name": "ai-agent-workshop-HotelApiStack-KH4YY0-ModifyResFn-AUTRhQjNjMwk",
+        "Runtime": "python3.13",
+        "Mem": 128,
+        "Timeout": 3,
+        "LastMod": "2026-05-04T10:05:25.061+0000"
+    },
+    {
+        "Name": "ai-agent-workshop-HotelApiStack-KH4YY0-CreateResFn-jvz2JhRF7FTc",
+        "Runtime": "nodejs22.x",
+        "Mem": 128,
+        "Timeout": 3,
+        "LastMod": "2026-05-04T10:05:25.116+0000"
+    },
+    {
+        "Name": "ai-agent-workshop-HotelApiStack-KH4YY0DI3-SearchFn-DxiOzEAGRwKK",
+        "Runtime": "nodejs22.x",
+        "Mem": 128,
+        "Timeout": 3,
+        "LastMod": "2026-05-04T10:05:25.171+0000"
+    },
+    {
+        "Name": "ai-agent-workshop-HotelApiStack-KH4YY0-CancelResFn-AaqZam72iwCz",
+        "Runtime": "nodejs22.x",
+        "Mem": 128,
+        "Timeout": 3,
+        "LastMod": "2026-05-04T10:05:25.068+0000"
+    },
+    {
+        "Name": "ai-agent-workshop-HotelApiStack-KH4YY0DI3-ApiKeyFn-Y0ML01Fvy9YU",
+        "Runtime": "python3.13",
+        "Mem": 128,
+        "Timeout": 3,
+        "LastMod": "2026-05-04T10:04:58.431+0000"
+    },
+    {
+        "Name": "ai-agent-workshop-HotelApiStack-KH4YY0D-SeedDataFn-WJg1gYxJiWPs",
+        "Runtime": "nodejs22.x",
+        "Mem": 256,
+        "Timeout": 300,
+        "LastMod": "2026-05-04T10:05:23.904+0000"
+    }
+]
+
+--- Duration p50 / p95 / p99 for past 24h (per Lambda) ---
+
+--- ai-agent-workshop-HotelApiStack-KH4YY0DI3-GetResFn-mfKpsO8DF7Ib ---
+
+--- CMD: aws cloudwatch get-metric-statistics --namespace AWS/Lambda --metric-name Duration --dimensions Name=FunctionName,Value=ai-agent-workshop-HotelApiStack-KH4YY0DI3-GetResFn-mfKpsO8DF7Ib --start-time 2026-05-25T13:11:30 --end-time 2026-05-26T13:11:30 --period 3600 --statistics Average Maximum --extended-statistics p50 p95 p99 --region us-east-1 --output json ---
+{
+    "Label": "Duration",
+    "Datapoints": []
+}
+
+--- ai-agent-workshop-HotelApiStack-KH4YY0D-S3UploadFn-tATGKAJpJGSW ---
+
+--- CMD: aws cloudwatch get-metric-statistics --namespace AWS/Lambda --metric-name Duration --dimensions Name=FunctionName,Value=ai-agent-workshop-HotelApiStack-KH4YY0D-S3UploadFn-tATGKAJpJGSW --start-time 2026-05-25T13:11:32 --end-time 2026-05-26T13:11:32 --period 3600 --statistics Average Maximum --extended-statistics p50 p95 p99 --region us-east-1 --output json ---
+{
+    "Label": "Duration",
+    "Datapoints": []
+}
+
+--- ai-agent-workshop-HotelApiStack-KH4YY0-ModifyResFn-AUTRhQjNjMwk ---
+
+--- CMD: aws cloudwatch get-metric-statistics --namespace AWS/Lambda --metric-name Duration --dimensions Name=FunctionName,Value=ai-agent-workshop-HotelApiStack-KH4YY0-ModifyResFn-AUTRhQjNjMwk --start-time 2026-05-25T13:11:34 --end-time 2026-05-26T13:11:34 --period 3600 --statistics Average Maximum --extended-statistics p50 p95 p99 --region us-east-1 --output json ---
+{
+    "Label": "Duration",
+    "Datapoints": []
+}
+
+--- ai-agent-workshop-HotelApiStack-KH4YY0-CreateResFn-jvz2JhRF7FTc ---
+
+--- CMD: aws cloudwatch get-metric-statistics --namespace AWS/Lambda --metric-name Duration --dimensions Name=FunctionName,Value=ai-agent-workshop-HotelApiStack-KH4YY0-CreateResFn-jvz2JhRF7FTc --start-time 2026-05-25T13:11:36 --end-time 2026-05-26T13:11:36 --period 3600 --statistics Average Maximum --extended-statistics p50 p95 p99 --region us-east-1 --output json ---
+{
+    "Label": "Duration",
+    "Datapoints": []
+}
+
+--- ai-agent-workshop-HotelApiStack-KH4YY0DI3-SearchFn-DxiOzEAGRwKK ---
+
+--- CMD: aws cloudwatch get-metric-statistics --namespace AWS/Lambda --metric-name Duration --dimensions Name=FunctionName,Value=ai-agent-workshop-HotelApiStack-KH4YY0DI3-SearchFn-DxiOzEAGRwKK --start-time 2026-05-25T13:11:38 --end-time 2026-05-26T13:11:38 --period 3600 --statistics Average Maximum --extended-statistics p50 p95 p99 --region us-east-1 --output json ---
+{
+    "Label": "Duration",
+    "Datapoints": []
+}
+
+--- ai-agent-workshop-HotelApiStack-KH4YY0-CancelResFn-AaqZam72iwCz ---
+
+--- CMD: aws cloudwatch get-metric-statistics --namespace AWS/Lambda --metric-name Duration --dimensions Name=FunctionName,Value=ai-agent-workshop-HotelApiStack-KH4YY0-CancelResFn-AaqZam72iwCz --start-time 2026-05-25T13:11:40 --end-time 2026-05-26T13:11:40 --period 3600 --statistics Average Maximum --extended-statistics p50 p95 p99 --region us-east-1 --output json ---
+{
+    "Label": "Duration",
+    "Datapoints": []
+}
+
+--- ai-agent-workshop-HotelApiStack-KH4YY0DI3-ApiKeyFn-Y0ML01Fvy9YU ---
+
+--- CMD: aws cloudwatch get-metric-statistics --namespace AWS/Lambda --metric-name Duration --dimensions Name=FunctionName,Value=ai-agent-workshop-HotelApiStack-KH4YY0DI3-ApiKeyFn-Y0ML01Fvy9YU --start-time 2026-05-25T13:11:42 --end-time 2026-05-26T13:11:42 --period 3600 --statistics Average Maximum --extended-statistics p50 p95 p99 --region us-east-1 --output json ---
+{
+    "Label": "Duration",
+    "Datapoints": []
+}
+
+--- ai-agent-workshop-HotelApiStack-KH4YY0D-SeedDataFn-WJg1gYxJiWPs ---
+
+--- CMD: aws cloudwatch get-metric-statistics --namespace AWS/Lambda --metric-name Duration --dimensions Name=FunctionName,Value=ai-agent-workshop-HotelApiStack-KH4YY0D-SeedDataFn-WJg1gYxJiWPs --start-time 2026-05-25T13:11:47 --end-time 2026-05-26T13:11:47 --period 3600 --statistics Average Maximum --extended-statistics p50 p95 p99 --region us-east-1 --output json ---
+{
+    "Label": "Duration",
+    "Datapoints": []
+}
+
+================================================================================
+  8. RECENT CONTACT TRACE RECORDS (latency in real calls)
+================================================================================
+Looking at contact attributes captured during real rate-collection calls.
+
+--- Recent contacts (last 24h) ---
+
+--- CMD: aws connect search-contacts --instance-id 6f93dfc3-9503-4b86-971b-f608ec484e78 --time-range Type=INITIATION_TIMESTAMP,StartTime=2026-05-25T13:11:52Z,EndTime=2026-05-26T13:11:52Z --max-results 10 --region us-east-1 --output json ---
+{
+    "Contacts": [],
+    "TotalCount": 0
+}
+
+================================================================================
+  9. BEDROCK MODEL & INFERENCE PROFILE
+================================================================================
+--- Inference profile for Haiku 4.5 (cross-region routing affects latency) ---
+
+--- CMD: aws bedrock get-inference-profile --inference-profile-identifier global.anthropic.claude-haiku-4-5-20251001-v1:0 --region us-east-1 --output json ---
+{
+    "inferenceProfileName": "Global Anthropic Claude Haiku 4.5",
+    "description": "Routes requests to Anthropic Claude Haiku 4.5 globally across all supported AWS Regions.",
+    "createdAt": "2025-10-13T20:55:08+00:00",
+    "updatedAt": "2026-04-22T19:34:33.299000+00:00",
+    "inferenceProfileArn": "arn:aws:bedrock:us-east-1:610639371721:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "models": [
+        {
+            "modelArn": "arn:aws:bedrock:::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0"
+        },
+        {
+            "modelArn": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0"
+        }
+    ],
+    "inferenceProfileId": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "status": "ACTIVE",
+    "type": "SYSTEM_DEFINED"
+}
+
+--- CMD: aws bedrock get-inference-profile --inference-profile-identifier us.anthropic.claude-haiku-4-5-20251001-v1:0 --region us-east-1 --output json ---
+{
+    "inferenceProfileName": "US Anthropic Claude Haiku 4.5",
+    "description": "Routes requests to Anthropic Claude Haiku 4.5 in us-east-1, us-east-2 and us-west-2.",
+    "createdAt": "2025-10-13T19:47:28.632000+00:00",
+    "updatedAt": "2026-04-22T20:53:18.694000+00:00",
+    "inferenceProfileArn": "arn:aws:bedrock:us-east-1:610639371721:inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "models": [
+        {
+            "modelArn": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0"
+        },
+        {
+            "modelArn": "arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0"
+        },
+        {
+            "modelArn": "arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0"
+        }
+    ],
+    "inferenceProfileId": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "status": "ACTIVE",
+    "type": "SYSTEM_DEFINED"
+}
+
+================================================================================
+  10. CONTACT FLOW / SESSION METRICS
+================================================================================
+--- Recent CloudWatch metrics for Connect instance ---
+
+--- CMD: aws cloudwatch list-metrics --namespace AWS/Connect --dimensions Name=InstanceId,Value=6f93dfc3-9503-4b86-971b-f608ec484e78 --region us-east-1 --output json ---
+{
+    "Metrics": [
+        {
+            "Namespace": "AWS/Connect",
+            "MetricName": "ConcurrentCalls",
+            "Dimensions": [
+                {
+                    "Name": "InstanceId",
+                    "Value": "6f93dfc3-9503-4b86-971b-f608ec484e78"
+                },
+                {
+                    "Name": "MetricGroup",
+                    "Value": "VoiceCalls"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/Connect",
+            "MetricName": "ConcurrentCallsPercentage",
+            "Dimensions": [
+                {
+                    "Name": "InstanceId",
+                    "Value": "6f93dfc3-9503-4b86-971b-f608ec484e78"
+                },
+                {
+                    "Name": "MetricGroup",
+                    "Value": "VoiceCalls"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/Connect",
+            "MetricName": "CallsPerInterval",
+            "Dimensions": [
+                {
+                    "Name": "InstanceId",
+                    "Value": "6f93dfc3-9503-4b86-971b-f608ec484e78"
+                },
+                {
+                    "Name": "MetricGroup",
+                    "Value": "VoiceCalls"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/Connect",
+            "MetricName": "SuccessfulChatsPerInterval",
+            "Dimensions": [
+                {
+                    "Name": "InstanceId",
+                    "Value": "6f93dfc3-9503-4b86-971b-f608ec484e78"
+                },
+                {
+                    "Name": "MetricGroup",
+                    "Value": "Chats"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/Connect",
+            "MetricName": "ConcurrentActiveChatsPercentage",
+            "Dimensions": [
+                {
+                    "Name": "InstanceId",
+                    "Value": "6f93dfc3-9503-4b86-971b-f608ec484e78"
+                },
+                {
+                    "Name": "MetricGroup",
+                    "Value": "Chats"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/Connect",
+            "MetricName": "ConcurrentActiveChats",
+            "Dimensions": [
+                {
+                    "Name": "InstanceId",
+                    "Value": "6f93dfc3-9503-4b86-971b-f608ec484e78"
+                },
+                {
+                    "Name": "MetricGroup",
+                    "Value": "Chats"
+                }
+            ]
+        }
+    ]
+}
+
+================================================================================
+  DIAGNOSTIC COMPLETE
+================================================================================
+Output file: hotel-latency-diagnose-20260526T131033Z.txt
+
+Next step: share hotel-latency-diagnose-20260526T131033Z.txt back. I'll analyze:
+  - whether cache_read_input_tokens > 0 anywhere (= caching working)
+  - actual deployed prompt token size
+  - exact tool count and individual tool def sizes
+  - Lambda p95/p99 durations (your hotel API contribution to total latency)
+  - and recommend the precise fixes ordered by impact.
