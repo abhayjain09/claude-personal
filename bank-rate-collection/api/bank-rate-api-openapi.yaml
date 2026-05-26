@@ -105,326 +105,128 @@ paths:
   # ─────────────────────────────────────────────
   # RATE SUBMISSION — CD (Steps 1–4)
   # ─────────────────────────────────────────────
-  /rates/cd:
+  # ─────────────────────────────────────────────
+  # RATE SUBMISSION — UNIFIED (Steps 1–11)
+  # One endpoint covers CD, Money Market, IRA, Savings, Checking, Specials.
+  # The productCategory discriminator selects which product is being submitted.
+  # Consolidating to one endpoint reduces the tool count in the AI Agent context
+  # by ~1000 tokens per turn, which is meaningful on long calls.
+  # ─────────────────────────────────────────────
+  /rates:
     post:
-      operationId: submitCDRates
-      summary: Submit collected CD (Certificate of Deposit) rates
+      operationId: submitRates
+      summary: Submit collected rates for one product category
       description: >-
-        Store CD rates collected during Steps 1–4. Accepts both standard ($10K) and
-        Jumbo ($100K) CD rates. Call once per tier. Rate and APY values are stored
-        as strings to preserve exact representation (e.g. "0.50", "1.25").
-      tags: [CD Rates]
+        Single endpoint for storing rates across all product categories (Steps 1–11).
+        Call once per product category per session. Required fields vary by
+        `productCategory`:
+
+          - `cd`             — requires `tier` (standard_10k|jumbo_100k) + `termRates[]`
+          - `money_market`   — requires `mmType` (standard|relationship) + `tiers[]`
+          - `ira`            — requires `iraType` (liquid|fixed_12mo), plus rate/apy
+          - `savings`        — rate/apy at $2,500 (or notOffered=true)
+          - `checking`       — rate/apy at $2,500 (or notOffered=true)
+          - `special`        — full 8-field special record
+
+        Set `notOffered: true` when the bank does not offer the product.
+      tags: [Rates]
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [sessionId, tier]
+              required: [sessionId, productCategory]
               properties:
                 sessionId:
                   type: string
                   description: Session ID from startCallSession
+                productCategory:
+                  type: string
+                  enum: [cd, money_market, ira, savings, checking, special]
+                  description: Which product category these rates belong to
+                notOffered:
+                  type: boolean
+                  default: false
+                  description: True if the bank does not offer this product
+                # CD-specific
                 tier:
                   type: string
                   enum: [standard_10k, jumbo_100k]
-                  description: Deposit tier — standard ($10K) or Jumbo ($100K)
-                rates:
+                  description: CD deposit tier (required when productCategory=cd)
+                termRates:
                   type: array
-                  description: Array of term rates collected
+                  description: CD term rates (productCategory=cd)
                   items:
                     $ref: '#/components/schemas/TermRate'
                 minimumAbove10k:
                   type: boolean
-                  description: >-
-                    Set to true if the bank's CD minimum is above $10K (standard tier skipped).
                   default: false
                 jumboDiffersFromStandard:
                   type: boolean
-                  description: Whether Jumbo rates differ from standard rates
                   default: true
                 formula:
                   type: string
-                  description: >-
-                    Formula used for Jumbo rates if banker gave a formula answer
-                    (e.g., "add 10 basis points to standard"). Leave empty if individual rates given.
-                  example: "add 10 basis points"
-      responses:
-        '200':
-          description: CD rates stored
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SubmitSuccess'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-
-  # ─────────────────────────────────────────────
-  # RATE SUBMISSION — MONEY MARKET (Steps 5–6)
-  # ─────────────────────────────────────────────
-  /rates/money-market:
-    post:
-      operationId: submitMoneyMarketRates
-      summary: Submit collected Money Market rates
-      description: >-
-        Store Money Market rates for Steps 5 (Standard MM) and 6 (Relationship/Premium MM).
-        The mmType field distinguishes between standard and relationship products.
-        Call separately for each distinct MM product.
-      tags: [Money Market Rates]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [sessionId, mmType]
-              properties:
-                sessionId:
-                  type: string
+                  description: Formula answer for jumbo CDs (e.g., "add 10 basis points")
+                # Money Market specific
                 mmType:
                   type: string
                   enum: [standard, relationship]
-                  description: Standard Money Market or Relationship/Premium Money Market
+                  description: MM type (required when productCategory=money_market)
                 productName:
                   type: string
-                  description: Product name as stated by banker (required for relationship MM)
-                  example: "Premier Savings"
-                minimumDeposit:
-                  type: number
-                  description: Minimum deposit amount in dollars
-                  example: 2500
-                tiers:
+                  description: Product name (required for relationship MM)
+                balanceTiers:
                   type: array
-                  description: Balance tiers with rate and APY
+                  description: MM balance tiers (productCategory=money_market)
                   items:
                     $ref: '#/components/schemas/BalanceTierRate'
                 relationshipRequirement:
                   type: string
-                  description: Relationship requirement for premium MM (e.g., "must have checking account")
                 flatRateAllBalances:
                   type: boolean
-                  description: True if banker stated a single flat rate covers all balance tiers
                   default: false
-                notOffered:
-                  type: boolean
-                  description: Set true if this MM type is not offered by the bank
-                  default: false
-      responses:
-        '200':
-          description: Money Market rates stored
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SubmitSuccess'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-
-  # ─────────────────────────────────────────────
-  # RATE SUBMISSION — IRA (Steps 7–8)
-  # ─────────────────────────────────────────────
-  /rates/ira:
-    post:
-      operationId: submitIRARates
-      summary: Submit collected IRA rates
-      description: >-
-        Store IRA rates for Step 7 (Liquid IRA at $10K) and Step 8 (Fixed IRA / 12-month IRA CD).
-        The iraType field distinguishes between liquid and fixed products.
-      tags: [IRA Rates]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [sessionId, iraType]
-              properties:
-                sessionId:
-                  type: string
+                # IRA specific
                 iraType:
                   type: string
                   enum: [liquid, fixed_12mo]
-                  description: Liquid IRA (IRA Savings / IRA MM) or Fixed 12-month IRA CD
+                  description: IRA type (required when productCategory=ira)
+                # Savings / Checking / IRA common
                 depositAmount:
                   type: number
-                  description: Deposit amount used for rate collection (standard is $10,000)
-                  example: 10000
+                  description: Deposit amount used for rate collection
                 rate:
                   type: string
                   description: Interest rate as percentage string
                   example: "0.50"
-                apy:
-                  type: string
-                  description: Annual Percentage Yield as percentage string
-                  example: "0.50"
-                rateEqualsApy:
-                  type: boolean
-                  description: True if rate and APY are identical for this product
-                notOffered:
-                  type: boolean
-                  description: Set true if this IRA type is not offered
-                  default: false
-      responses:
-        '200':
-          description: IRA rates stored
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SubmitSuccess'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-
-  # ─────────────────────────────────────────────
-  # RATE SUBMISSION — SAVINGS (Step 9)
-  # ─────────────────────────────────────────────
-  /rates/savings:
-    post:
-      operationId: submitSavingsRates
-      summary: Submit collected Savings account rates
-      description: >-
-        Store regular savings account rates at $2,500 (Step 9).
-      tags: [Savings Rates]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [sessionId]
-              properties:
-                sessionId:
-                  type: string
-                depositAmount:
-                  type: number
-                  description: Deposit amount for rate collection
-                  example: 2500
-                rate:
-                  type: string
-                  description: Interest rate as percentage string
-                  example: "0.25"
                 apy:
                   type: string
                   description: APY as percentage string
-                  example: "0.25"
+                  example: "0.50"
                 rateEqualsApy:
                   type: boolean
                   default: false
-                notOffered:
-                  type: boolean
-                  description: Set true if regular savings account is not offered
-                  default: false
-      responses:
-        '200':
-          description: Savings rates stored
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SubmitSuccess'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-
-  # ─────────────────────────────────────────────
-  # RATE SUBMISSION — CHECKING (Step 10)
-  # ─────────────────────────────────────────────
-  /rates/checking:
-    post:
-      operationId: submitCheckingRates
-      summary: Submit collected interest-bearing Checking rates
-      description: >-
-        Store interest-bearing checking account rates at $2,500 (Step 10).
-        Only for accounts with no relationship requirements.
-      tags: [Checking Rates]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [sessionId]
-              properties:
-                sessionId:
+                # Special-specific
+                specialProductType:
                   type: string
-                depositAmount:
-                  type: number
-                  example: 2500
-                rate:
-                  type: string
-                  example: "0.01"
-                apy:
-                  type: string
-                  example: "0.01"
-                rateEqualsApy:
-                  type: boolean
-                  default: false
-                notOffered:
-                  type: boolean
-                  description: Set true if interest-bearing checking is not offered
-                  default: false
-      responses:
-        '200':
-          description: Checking rates stored
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SubmitSuccess'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-
-  # ─────────────────────────────────────────────
-  # RATE SUBMISSION — SPECIALS (Step 11)
-  # ─────────────────────────────────────────────
-  /rates/specials:
-    post:
-      operationId: submitSpecial
-      summary: Submit a single promotional special rate
-      description: >-
-        Store one promotional or special-rate product (Step 11).
-        Call this endpoint once per special. All 8 required fields must be confirmed
-        before submission. Submit multiple specials with multiple calls.
-      tags: [Specials]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [sessionId, productType, term, rate, apy, minimumDeposit, iraApplicable]
-              properties:
-                sessionId:
-                  type: string
-                productType:
-                  type: string
-                  description: Product type of the special (e.g. CD, Money Market, Savings)
+                  description: Underlying product type of the special (e.g. CD, MM)
                   example: "CD"
                 term:
                   type: string
                   description: Term of the special product
                   example: "7 months"
-                rate:
-                  type: string
-                  description: Interest rate as percentage string
-                  example: "5.00"
-                apy:
-                  type: string
-                  description: APY as percentage string
-                  example: "5.12"
                 minimumDeposit:
                   type: number
-                  description: Minimum deposit amount required
-                  example: 1000
                 maximumDeposit:
                   type: number
-                  description: Maximum deposit amount (null if no cap)
-                  example: 250000
                 qualificationRequirements:
                   type: string
-                  description: Any qualification requirements to obtain this special rate
-                  example: "New money only, must open checking account"
                 iraApplicable:
                   type: boolean
-                  description: Whether this special rate applies to IRA accounts as well
+                  description: Whether the special applies to IRAs
       responses:
         '200':
-          description: Special rate stored
+          description: Rates stored
           content:
             application/json:
               schema:

@@ -20,23 +20,25 @@ This is enforced in the prompt and reinforced in every tool's `instruction` text
 
 ### Per-tool bridging filler reference
 
-| Tool                      | Instant ack example      | Bridging filler example                       |
-|---------------------------|--------------------------|-----------------------------------------------|
-| `startCallSession`        | (silent — pre-greeting)  | (silent — pre-greeting)                       |
-| `getCallSession`          | "One sec."               | "Let me check where we left off."             |
-| `closeCallSession`        | "Got it, thanks."        | "Let me wrap up my notes."                    |
-| `submitCDRates`           | "Got it."                | "Let me log those CD rates now."              |
-| `submitMoneyMarketRates`  | "Perfect."               | "Let me record those Money Market rates."     |
-| `submitIRARates`          | "Noted."                 | "Let me note that IRA rate."                  |
-| `submitSavingsRates`      | "Alright."               | "Let me save that savings rate."              |
-| `submitCheckingRates`     | "Sure."                  | "Let me save that checking rate."             |
-| `submitSpecial`           | "Appreciate that."       | "Let me write that special down."             |
-| `scheduleCallback`        | "Of course."             | "Let me get that callback on the books."      |
-| `markDNC`                 | "Understood, apologies." | "Let me take care of that right away."        |
-| `recordMergerAcquisition` | "Thanks for letting me know." | "Let me note the merger details."        |
-| `Retrieve`                | "Hmm, let me see."       | "Let me look that up for you."                |
-| `Escalate`                | (none — speak final line first) | "I'm connecting you with a specialist now." |
-| `Complete`                | (none — banker has said goodbye) | (no output after Complete)              |
+The 6 separate submit-tools were consolidated into one `submitRates` tool with a `productCategory` discriminator. This shrinks the AI Agent context window by ~1000 tokens per turn.
+
+| Tool                              | Instant ack example      | Bridging filler example                       |
+|-----------------------------------|--------------------------|-----------------------------------------------|
+| `startCallSession`                | (silent — pre-greeting)  | (silent — pre-greeting)                       |
+| `getCallSession`                  | "One sec."               | "Let me check where we left off."             |
+| `closeCallSession`                | "Got it, thanks."        | "Let me wrap up my notes."                    |
+| `submitRates` (cd)                | "Got it."                | "Let me log those CD rates now."              |
+| `submitRates` (money_market)      | "Perfect."               | "Let me record those Money Market rates."     |
+| `submitRates` (ira)               | "Noted."                 | "Let me note that IRA rate."                  |
+| `submitRates` (savings)           | "Alright."               | "Let me save that savings rate."              |
+| `submitRates` (checking)          | "Sure."                  | "Let me save that checking rate."             |
+| `submitRates` (special)           | "Appreciate that."       | "Let me write that special down."             |
+| `scheduleCallback`                | "Of course."             | "Let me get that callback on the books."      |
+| `markDNC`                         | "Understood, apologies." | "Let me take care of that right away."        |
+| `recordMergerAcquisition`         | "Thanks for letting me know." | "Let me note the merger details."        |
+| `Retrieve`                        | "Hmm, let me see."       | "Let me look that up for you."                |
+| `Escalate`                        | (none — speak final line first) | "I'm connecting you with a specialist now." |
+| `Complete`                        | (none — banker has said goodbye) | (no output after Complete)              |
 
 ---
 
@@ -183,23 +185,16 @@ Retrieves the current call session state — useful for resuming after interrupt
 ### closeCallSession
 Finalises the session with `completionType` and `bankerName`. Must be called before `Complete`.
 
-### submitCDRates
-Stores CD rate data after Steps 1–4. Accepts both `standard_10k` and `jumbo_100k` tiers.
+### submitRates (UNIFIED)
+Single endpoint for all rate submissions. The `productCategory` discriminator selects:
+- `cd`           → Steps 1–4 (`tier=standard_10k` or `jumbo_100k`, `termRates[]`)
+- `money_market` → Steps 5–6 (`mmType=standard` or `relationship`, `balanceTiers[]`)
+- `ira`          → Steps 7–8 (`iraType=liquid` or `fixed_12mo`)
+- `savings`      → Step 9 (rate/apy at $2,500)
+- `checking`     → Step 10 (rate/apy at $2,500)
+- `special`      → Step 11 (full 8-field special record — call once per special)
 
-### submitMoneyMarketRates
-Stores Money Market rate data after Steps 5–6. Separate calls for `standard` and `relationship` MM.
-
-### submitIRARates
-Stores IRA rate data after Steps 7–8. Separate calls for `liquid` and `fixed_12mo` IRA types.
-
-### submitSavingsRates
-Stores regular savings rate data after Step 9.
-
-### submitCheckingRates
-Stores interest-bearing checking rate data after Step 10.
-
-### submitSpecial
-Stores one promotional special rate record after Step 11. Call once per special.
+Set `notOffered: true` when the bank does not offer the product.
 
 ### scheduleCallback
 Records a callback request when the banker is unavailable.
@@ -216,26 +211,26 @@ Records a bank merger or acquisition event.
 
 ```
 Call connects
-  → startCallSession            (session init)
+  → startCallSession                                  (session init)
   → [conversation: Steps 1-3]
-  → submitCDRates (standard)
+  → submitRates(productCategory=cd, tier=standard_10k)
   → [conversation: Step 4]
-  → submitCDRates (jumbo)
+  → submitRates(productCategory=cd, tier=jumbo_100k)
   → [conversation: Step 5]
-  → submitMoneyMarketRates (standard)
+  → submitRates(productCategory=money_market, mmType=standard)
   → [conversation: Step 6]
-  → submitMoneyMarketRates (relationship) OR skip with notOffered=true
+  → submitRates(productCategory=money_market, mmType=relationship)  OR notOffered=true
   → [conversation: Step 7]
-  → submitIRARates (liquid) OR skip with notOffered=true
+  → submitRates(productCategory=ira, iraType=liquid)                OR notOffered=true
   → [conversation: Step 8]
-  → submitIRARates (fixed_12mo) OR skip with notOffered=true
+  → submitRates(productCategory=ira, iraType=fixed_12mo)            OR notOffered=true
   → [conversation: Step 9]
-  → submitSavingsRates OR skip with notOffered=true
+  → submitRates(productCategory=savings)                            OR notOffered=true
   → [conversation: Step 10]
-  → submitCheckingRates OR skip with notOffered=true
+  → submitRates(productCategory=checking)                           OR notOffered=true
   → [conversation: Step 11 — per special]
-  → submitSpecial (repeat for each special)
+  → submitRates(productCategory=special, ...)                       (repeat for each special)
   → [conversation: Step 12 — collect banker name, say goodbye]
-  → closeCallSession (completionType="full", bankerName)
-  → Complete (completion_type="full", banker_name)
+  → closeCallSession(completionType="full", bankerName)
+  → Complete(completion_type="full", banker_name)
 ```

@@ -370,18 +370,8 @@ Resources:
               // POST /sessions/{sessionId}/close
               if (method === 'POST' && path.startsWith('/sessions/') && path.endsWith('/close'))
                 return closeCallSession(pathParams.sessionId, body);
-              // POST /rates/cd
-              if (method === 'POST' && path === '/rates/cd') return submitCDRates(body);
-              // POST /rates/money-market
-              if (method === 'POST' && path === '/rates/money-market') return submitMoneyMarketRates(body);
-              // POST /rates/ira
-              if (method === 'POST' && path === '/rates/ira') return submitIRARates(body);
-              // POST /rates/savings
-              if (method === 'POST' && path === '/rates/savings') return submitSavingsRates(body);
-              // POST /rates/checking
-              if (method === 'POST' && path === '/rates/checking') return submitCheckingRates(body);
-              // POST /rates/specials
-              if (method === 'POST' && path === '/rates/specials') return submitSpecial(body);
+              // POST /rates — unified rate submission for all 6 product categories
+              if (method === 'POST' && path === '/rates') return submitRates(body);
               // POST /callbacks
               if (method === 'POST' && path === '/callbacks') return scheduleCallback(body);
               // POST /dnc
@@ -461,83 +451,94 @@ Resources:
             return respond(200, { success: true, sessionId, productType, message: `${productType} rates stored successfully` });
           }
 
-          async function submitCDRates(body) {
-            if (!body.sessionId || !body.tier) return badRequest('sessionId and tier are required');
-            const productType = body.tier === 'jumbo_100k' ? 'cd_jumbo' : 'cd_standard';
-            return storeRates(body.sessionId, productType, {
-              tier:                     body.tier,
-              rates:                    body.rates || [],
-              minimumAbove10k:          body.minimumAbove10k || false,
-              jumboDiffersFromStandard: body.jumboDiffersFromStandard !== false,
-              formula:                  body.formula || null
-            });
-          }
-
-          async function submitMoneyMarketRates(body) {
-            if (!body.sessionId || !body.mmType) return badRequest('sessionId and mmType are required');
-            const productType = body.mmType === 'relationship' ? 'mm_relationship' : 'mm_standard';
-            return storeRates(body.sessionId, productType, {
-              mmType:                body.mmType,
-              productName:           body.productName || null,
-              minimumDeposit:        body.minimumDeposit || null,
-              tiers:                 body.tiers || [],
-              relationshipReq:       body.relationshipRequirement || null,
-              flatRateAllBalances:   body.flatRateAllBalances || false,
-              notOffered:            body.notOffered || false
-            });
-          }
-
-          async function submitIRARates(body) {
-            if (!body.sessionId || !body.iraType) return badRequest('sessionId and iraType are required');
-            const productType = body.iraType === 'fixed_12mo' ? 'ira_fixed' : 'ira_liquid';
-            return storeRates(body.sessionId, productType, {
-              iraType:       body.iraType,
-              depositAmount: body.depositAmount || 10000,
-              rate:          body.rate || null,
-              apy:           body.apy || null,
-              rateEqualsApy: body.rateEqualsApy || false,
-              notOffered:    body.notOffered || false
-            });
-          }
-
-          async function submitSavingsRates(body) {
-            if (!body.sessionId) return badRequest('sessionId is required');
-            return storeRates(body.sessionId, 'savings', {
-              depositAmount: body.depositAmount || 2500,
-              rate:          body.rate || null,
-              apy:           body.apy || null,
-              rateEqualsApy: body.rateEqualsApy || false,
-              notOffered:    body.notOffered || false
-            });
-          }
-
-          async function submitCheckingRates(body) {
-            if (!body.sessionId) return badRequest('sessionId is required');
-            return storeRates(body.sessionId, 'checking', {
-              depositAmount: body.depositAmount || 2500,
-              rate:          body.rate || null,
-              apy:           body.apy || null,
-              rateEqualsApy: body.rateEqualsApy || false,
-              notOffered:    body.notOffered || false
-            });
-          }
-
-          async function submitSpecial(body) {
-            if (!body.sessionId || !body.productType || !body.term) {
-              return badRequest('sessionId, productType, and term are required');
+          // Unified rate submission — discriminator is body.productCategory.
+          // The AI Agent only sees one tool (submitRates) instead of six, which
+          // cuts ~1000 tokens per turn from the model context window.
+          async function submitRates(body) {
+            if (!body.sessionId || !body.productCategory) {
+              return badRequest('sessionId and productCategory are required');
             }
-            // Store specials as list — key includes a timestamp suffix for uniqueness
-            const productType = `special_${Date.now()}`;
-            return storeRates(body.sessionId, productType, {
-              specialProductType:       body.productType,
-              term:                     body.term,
-              rate:                     body.rate,
-              apy:                      body.apy,
-              minimumDeposit:           body.minimumDeposit,
-              maximumDeposit:           body.maximumDeposit || null,
-              qualificationRequirements: body.qualificationRequirements || null,
-              iraApplicable:            body.iraApplicable || false
-            });
+            const c = body.productCategory;
+
+            if (c === 'cd') {
+              if (!body.tier) return badRequest('tier is required for productCategory=cd');
+              const productType = body.tier === 'jumbo_100k' ? 'cd_jumbo' : 'cd_standard';
+              return storeRates(body.sessionId, productType, {
+                tier:                     body.tier,
+                rates:                    body.termRates || [],
+                minimumAbove10k:          body.minimumAbove10k || false,
+                jumboDiffersFromStandard: body.jumboDiffersFromStandard !== false,
+                formula:                  body.formula || null,
+                notOffered:               body.notOffered || false
+              });
+            }
+
+            if (c === 'money_market') {
+              if (!body.mmType) return badRequest('mmType is required for productCategory=money_market');
+              const productType = body.mmType === 'relationship' ? 'mm_relationship' : 'mm_standard';
+              return storeRates(body.sessionId, productType, {
+                mmType:              body.mmType,
+                productName:         body.productName || null,
+                minimumDeposit:      body.minimumDeposit || null,
+                tiers:               body.balanceTiers || [],
+                relationshipReq:     body.relationshipRequirement || null,
+                flatRateAllBalances: body.flatRateAllBalances || false,
+                notOffered:          body.notOffered || false
+              });
+            }
+
+            if (c === 'ira') {
+              if (!body.iraType) return badRequest('iraType is required for productCategory=ira');
+              const productType = body.iraType === 'fixed_12mo' ? 'ira_fixed' : 'ira_liquid';
+              return storeRates(body.sessionId, productType, {
+                iraType:       body.iraType,
+                depositAmount: body.depositAmount || 10000,
+                rate:          body.rate || null,
+                apy:           body.apy || null,
+                rateEqualsApy: body.rateEqualsApy || false,
+                notOffered:    body.notOffered || false
+              });
+            }
+
+            if (c === 'savings') {
+              return storeRates(body.sessionId, 'savings', {
+                depositAmount: body.depositAmount || 2500,
+                rate:          body.rate || null,
+                apy:           body.apy || null,
+                rateEqualsApy: body.rateEqualsApy || false,
+                notOffered:    body.notOffered || false
+              });
+            }
+
+            if (c === 'checking') {
+              return storeRates(body.sessionId, 'checking', {
+                depositAmount: body.depositAmount || 2500,
+                rate:          body.rate || null,
+                apy:           body.apy || null,
+                rateEqualsApy: body.rateEqualsApy || false,
+                notOffered:    body.notOffered || false
+              });
+            }
+
+            if (c === 'special') {
+              if (!body.specialProductType || !body.term) {
+                return badRequest('specialProductType and term are required for productCategory=special');
+              }
+              // Store specials with timestamped key for uniqueness
+              const productType = `special_${Date.now()}`;
+              return storeRates(body.sessionId, productType, {
+                specialProductType:        body.specialProductType,
+                term:                      body.term,
+                rate:                      body.rate,
+                apy:                       body.apy,
+                minimumDeposit:            body.minimumDeposit,
+                maximumDeposit:            body.maximumDeposit || null,
+                qualificationRequirements: body.qualificationRequirements || null,
+                iraApplicable:             body.iraApplicable || false
+              });
+            }
+
+            return badRequest(`Unknown productCategory: ${c}`);
           }
 
           async function scheduleCallback(body) {

@@ -55,6 +55,18 @@ Parameters:
     AllowedValues: [en_US, en_GB]
     Description: Locale for AI Agent responses.
 
+  ModelId:
+    Type: String
+    Default: us.anthropic.claude-haiku-4-5-20251001-v1:0
+    AllowedValues:
+      - us.anthropic.claude-haiku-4-5-20251001-v1:0
+      - global.anthropic.claude-haiku-4-5-20251001-v1:0
+    Description: >-
+      Bedrock inference profile for the AI Prompt. Default is `us.` which routes
+      only across us-east-1, us-east-2 and us-west-2 — saves 100-300ms per turn
+      vs `global.` (worldwide routing). Use `global.` only if you need
+      cross-region failover under throttling.
+
   Boto3LayerArn:
     Type: String
     Default: ''
@@ -271,6 +283,7 @@ Resources:
               s3_bucket      = props.get('AssetsBucketName', '')
               gateway_arn    = props.get('AgentCoreGatewayArn', '')
               locale         = props.get('Locale', 'en_US')
+              model_id       = props.get('ModelId', 'us.anthropic.claude-haiku-4-5-20251001-v1:0')
 
               client = boto3.client('qconnect', region_name=region)
 
@@ -301,7 +314,7 @@ Resources:
                       description='Ryan rate-collection agent prompt for S&P Global Ratewatch',
                       type='ORCHESTRATION',
                       apiFormat='MESSAGES',
-                      modelId='global.anthropic.claude-haiku-4-5-20251001-v1:0',
+                      modelId=model_id,
                       templateConfiguration={
                           'textFullAIPromptEditTemplateConfiguration': {
                               'text': prompt_text
@@ -415,9 +428,13 @@ Resources:
                   'userInteractionConfiguration': {'isUserConfirmationRequired': False}
               }
 
-              # Bank Rate API tools via AgentCore Gateway
-              # Per-tool instructions explicitly remind the model to use the two-message
-              # pre-tool latency pattern with a tool-specific bridging filler.
+              # Bank Rate API tools via AgentCore Gateway.
+              # We consolidated 6 separate submit-tools into ONE generic `submitRates`
+              # tool with a productCategory discriminator. This shrinks the model
+              # context by ~1000 tokens per turn (less tool def overhead) and
+              # simplifies tool selection (fewer choices = faster decisions).
+              # Each instruction reminds the model to emit the two-message
+              # pre-tool latency filler.
               api_ops = {
                   'startCallSession': (
                       'Create a new call session record. Call this SILENTLY as the very first '
@@ -432,29 +449,15 @@ Resources:
                       'Finalise the session with completionType and bankerName. MUST be called '
                       'BEFORE Complete. Pre-tool bridging filler example: "Let me wrap up my notes."'
                   ),
-                  'submitCDRates': (
-                      'Store CD rate data after Step 3 (standard_10k tier) or Step 4 (jumbo_100k tier). '
-                      'Pre-tool bridging filler example: "Let me log those CD rates now."'
-                  ),
-                  'submitMoneyMarketRates': (
-                      'Store Money Market rate data after Step 5 (mmType=standard) or Step 6 (mmType=relationship). '
-                      'Pre-tool bridging filler example: "Let me record those Money Market rates."'
-                  ),
-                  'submitIRARates': (
-                      'Store IRA rate data after Step 7 (iraType=liquid) or Step 8 (iraType=fixed_12mo). '
-                      'Pre-tool bridging filler example: "Let me note that IRA rate."'
-                  ),
-                  'submitSavingsRates': (
-                      'Store regular savings rate data after Step 9. '
-                      'Pre-tool bridging filler example: "Let me save that savings rate."'
-                  ),
-                  'submitCheckingRates': (
-                      'Store interest-bearing checking rate data after Step 10. '
-                      'Pre-tool bridging filler example: "Let me save that checking rate."'
-                  ),
-                  'submitSpecial': (
-                      'Store ONE promotional special rate record after all 8 fields are confirmed in Step 11. '
-                      'Call once per special. Pre-tool bridging filler example: "Let me write that special down."'
+                  'submitRates': (
+                      'Unified rate submission for all product categories. Set productCategory to '
+                      'one of: cd, money_market, ira, savings, checking, special. Provide only the '
+                      'fields relevant to that category — see the OpenAPI spec for the schema. '
+                      'Set notOffered=true if the bank does not offer the product. Call once per '
+                      'product category per session. Pre-tool bridging filler MUST be specific to '
+                      'the product: "Let me log those CD rates now." / "Let me record those Money '
+                      'Market rates." / "Let me note that IRA rate." / "Let me save that savings '
+                      'rate." / "Let me save that checking rate." / "Let me write that special down."'
                   ),
                   'scheduleCallback': (
                       'Record a callback request when the banker is unavailable. '
@@ -633,6 +636,7 @@ Resources:
       PromptUrl:              !Ref BankRateCollectionPromptUrl
       AgentCoreGatewayArn:    !Ref AgentCoreGatewayArn
       Locale:                 !Ref Locale
+      ModelId:                !Ref ModelId
 
 # =============================================================================
 # OUTPUTS
